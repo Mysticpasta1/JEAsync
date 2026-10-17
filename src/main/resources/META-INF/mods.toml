@@ -1,0 +1,40 @@
+modLoader="javafml"
+loaderVersion="${forgeLoaderVersionRange}"
+
+license="The MIT License (MIT)"
+issueTrackerURL="${githubUrl}/issues"
+
+[[mods]]
+modId="${modId}"
+version="${modVersion}"
+displayName="${modName}"
+description='''
+Runs opt-in JEI plugin registration off the main thread to speed up startup.
+Requires upstream JEI and patches it at runtime with mixins.
+'''
+
+[[dependencies.${modId}]]
+    modId="forge"
+    mandatory=true
+    versionRange="${forgeVersionRange}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${modId}]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="${minecraftVersionRange}"
+    ordering="NONE"
+    side="BOTH"
+
+# Pinned tightly: the mixins overwrite internal methods that JEI's API contract
+# does not cover, so a different JEI release is not safe to load against.
+[[dependencies.${modId}]]
+    modId="jei"
+    mandatory=true
+    versionRange="${jeiVersionRange}"
+    ordering="AFTER"
+    side="BOTH"
+
+# The mixin config is declared by the MixinConfigs manifest attribute, not here.
+# Forge 1.20.1 does not support a [[mixins]] section in mods.toml; see build.gradle.

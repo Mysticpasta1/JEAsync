@@ -1,0 +1,17 @@
+pluginManagement {
+    repositories {
+        maven {
+            name = 'Forge'
+            url = 'https://maven.minecraftforge.net'
+            content {
+                // includeGroup matches exactly; the ForgeGradle plugin marker lives under
+                // the net.minecraftforge.gradle subgroup, so this has to be subgroups.
+                includeGroupAndSubgroups 'net.minecraftforge'
+                includeGroupAndSubgroups 'cpw.mods'
+            }
+        }
+        gradlePluginPortal()
+    }
+}
+
+rootProject.name = 'jeiasync'

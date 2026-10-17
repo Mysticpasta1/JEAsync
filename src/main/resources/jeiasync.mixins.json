@@ -1,0 +1,35 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.jeiasync.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "mixins": [
+    "collect.TableMixin",
+    "collect.MultiMapMixin",
+    "collect.MultiMapAccessor",
+    "collect.RecipeManagerInternalInvoker",
+    "collect.SetMultiMapMixin",
+    "collect.ListMultiMapMixin",
+    "collect.RecipeTypeDataMixin",
+    "collect.IngredientToRecipesMapMixin",
+    "collect.RecipeIngredientTableMixin",
+    "collect.RecipeMapMixin",
+    "collect.RecipeManagerInternalMixin",
+    "collect.IngredientSetMixin",
+    "collect.RecipeManagerMixin",
+    "collect.IngredientManagerMixin",
+    "collect.PluginManagerMixin",
+    "collect.RegisteredIngredientsMixin",
+    "collect.SubtypeInterpretersMixin",
+    "collect.ModHelperMixin",
+    "collect.IngredientVisibilityMixin",
+    "collect.IngredientBlacklistInternalMixin",
+    "search.ElementSearchMixin",
+    "search.ElementSearchLowMemMixin",
+    "search.IngredientFilterMixin",
+    "load.PluginCallerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
