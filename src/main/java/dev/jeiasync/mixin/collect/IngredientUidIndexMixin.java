@@ -53,7 +53,7 @@ import java.util.function.Supplier;
  * mezz.jei.library.recipes.collect to module minecraft}. A redirect on the constructor needs
  * neither of the package-private types, so it survives that constraint.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 19.69.0.456.
  */
 @Mixin(targets = "mezz.jei.library.recipes.collect.IngredientUidIndex", remap = false)
 public abstract class IngredientUidIndexMixin {

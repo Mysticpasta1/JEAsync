@@ -18,7 +18,7 @@ import org.spongepowered.asm.mixin.gen.Accessor;
  * <p>
  * Client only. A dedicated server has no {@code Minecraft} class to add the interface to.
  */
-@Mixin(Minecraft.class)
+@Mixin(value = Minecraft.class, remap = false)
 public interface MinecraftClientAccessor {
 	@Accessor("level")
 	ClientLevel jeiAsyncLevel();

@@ -1,8 +1,8 @@
 package dev.jeiasync.mixin.startup;
 
 import dev.jeiasync.JeiLoadProgress;
-import mezz.jei.forge.startup.EventRegistration;
-import mezz.jei.forge.events.RuntimeEventSubscriptions;
+import mezz.jei.neoforge.events.RuntimeEventSubscriptions;
+import mezz.jei.neoforge.startup.EventRegistration;
 import mezz.jei.gui.startup.JeiEventHandlers;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
@@ -14,9 +14,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * Moves JEI's runtime screen listeners onto the client thread, after startup has finished.
  * <p>
- * {@code ForgeGuiPlugin.registerRuntime} runs on the startup worker. Registering onto
- * {@code MinecraftForge.EVENT_BUS} from that worker races a container screen that is already
- * rendering. The listeners are stored and applied on the client thread once the runtime exists.
+ * {@code NeoForgeGuiPlugin.registerRuntime} runs on the startup worker. Registering onto the
+ * game event bus from that worker races a container screen that is already rendering. The
+ * listeners are stored and applied on the client thread once the runtime exists.
  */
 @Mixin(value = EventRegistration.class, remap = false)
 public abstract class EventRegistrationMixin {

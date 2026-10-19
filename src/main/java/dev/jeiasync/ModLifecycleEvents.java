@@ -1,16 +1,16 @@
 package dev.jeiasync;
 
-import net.minecraftforge.event.server.ServerStoppingEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.event.config.ModConfigEvent;
-import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.fml.event.config.ModConfigEvent;
+import net.neoforged.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.neoforged.neoforge.event.server.ServerStoppingEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 /**
- * Lifecycle handlers, split by bus because Forge's two buses are checked separately: a class
- * registered on the mod bus may only handle {@code IModBusEvent}, and one registered on the Forge
+ * Lifecycle handlers, split by bus because the two buses are checked separately: a class
+ * registered on the mod bus may only handle {@code IModBusEvent}, and one registered on the game
  * bus may only handle regular game events. Mixing them on a single instance is rejected at
  * construction time rather than silently ignored.
  */
@@ -20,7 +20,7 @@ final class ModLifecycleEvents {
 	private ModLifecycleEvents() {
 	}
 
-	@Mod.EventBusSubscriber(modid = JeiAsyncMod.MOD_ID, bus = Mod.EventBusSubscriber.Bus.MOD)
+	@EventBusSubscriber(modid = JeiAsyncMod.MOD_ID, bus = EventBusSubscriber.Bus.MOD)
 	public static class ModBus {
 		private ModBus() {
 		}
@@ -32,12 +32,13 @@ final class ModLifecycleEvents {
 			event.enqueueWork(MixinSelfCheck::run);
 		}
 
-		/** Logs the effective settings once Forge has read the config file. */
+		/** Logs the effective settings once the config file has been read. */
 		@SubscribeEvent
 		public static void onConfigLoading(ModConfigEvent.Loading event) {
 			if (!event.getConfig().getModId().equals(JeiAsyncMod.MOD_ID)) {
 				return;
 			}
+			AsyncPluginSupport.applyConfiguredThreads();
 			LOGGER.info(
 				"[async-diag] effective settings: threads={} recipeRowCapacity={}",
 				AsyncConfig.getThreadCount(),
@@ -45,7 +46,7 @@ final class ModLifecycleEvents {
 		}
 	}
 
-	@Mod.EventBusSubscriber(modid = JeiAsyncMod.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
+	@EventBusSubscriber(modid = JeiAsyncMod.MOD_ID, bus = EventBusSubscriber.Bus.GAME)
 	public static class ForgeBus {
 		private ForgeBus() {
 		}

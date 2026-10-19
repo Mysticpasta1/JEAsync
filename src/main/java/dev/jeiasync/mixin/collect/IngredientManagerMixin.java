@@ -30,7 +30,7 @@ import java.util.List;
  * are serialised on it. Notification is copied to a list before iterating so that a listener which
  * registers another listener mid-callback cannot cause a concurrent modification.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 19.69.0.456.
  */
 @Mixin(value = mezz.jei.library.ingredients.IngredientManager.class, remap = false)
 public abstract class IngredientManagerMixin implements mezz.jei.api.runtime.IIngredientManager {

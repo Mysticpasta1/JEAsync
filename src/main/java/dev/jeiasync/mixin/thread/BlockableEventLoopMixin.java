@@ -29,7 +29,7 @@ import java.util.function.Supplier;
  * The guard fires only inside {@link RenderThreadGuard#enterPluginRegistration}, which wraps a
  * dispatched plugin callback. Vanilla's own calls, including the render thread, are unchanged.
  */
-@Mixin(BlockableEventLoop.class)
+@Mixin(value = BlockableEventLoop.class, remap = false)
 public abstract class BlockableEventLoopMixin {
 
 	/**

@@ -13,7 +13,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /**
  * Reads the block-to-item map under {@link BlockItemMapLock}.
  */
-@Mixin(Item.class)
+@Mixin(value = Item.class, remap = false)
 public abstract class ItemByBlockMixin {
 	@Inject(method = "byBlock", at = @At("HEAD"), cancellable = true)
 	private static void jeiasync$lockedByBlock(Block block, CallbackInfoReturnable<Item> cir) {

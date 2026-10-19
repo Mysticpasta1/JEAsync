@@ -3,7 +3,7 @@
   "minVersion": "0.8",
   "package": "dev.jeiasync.mixin.compat",
   "plugin": "dev.jeiasync.mixin.compat.JeiPlusPlusMixinPlugin",
-  "compatibilityLevel": "JAVA_17",
+  "compatibilityLevel": "JAVA_21",
   "refmap": "jeiasync.refmap.json",
   "client": [
     "RecipeTreeFavoritesMixin",

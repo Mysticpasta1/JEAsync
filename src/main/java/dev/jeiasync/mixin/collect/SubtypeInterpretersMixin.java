@@ -4,12 +4,12 @@ import mezz.jei.api.ingredients.IIngredientTypeWithSubtypes;
 import mezz.jei.api.ingredients.subtypes.IIngredientSubtypeInterpreter;
 import mezz.jei.api.ingredients.subtypes.ISubtypeInterpreter;
 import mezz.jei.library.ingredients.subtypes.LegacyInterpreterAdapter;
+import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
 
 import java.util.Map;
-import java.util.Optional;
 
 /**
  * Makes {@link mezz.jei.library.ingredients.subtypes.SubtypeInterpreters} safe for concurrent
@@ -22,7 +22,7 @@ import java.util.Optional;
  * map's monitor - including the check-then-put in {@code addInterpreter}, which is a
  * read-modify-write on the map and so has to be atomic rather than two separately-locked steps.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 19.69.0.456.
  */
 @Mixin(value = mezz.jei.library.ingredients.subtypes.SubtypeInterpreters.class, remap = false)
 public abstract class SubtypeInterpretersMixin {
@@ -63,12 +63,24 @@ public abstract class SubtypeInterpretersMixin {
 	 * @reason Lock the interpreter lookup so a read does not race registration.
 	 */
 	@Overwrite
-	public <B, I> Optional<ISubtypeInterpreter<I>> get(IIngredientTypeWithSubtypes<B, I> type, I ingredient) {
+	@Nullable
+	public <B, I> ISubtypeInterpreter<I> get(IIngredientTypeWithSubtypes<B, I> type, I ingredient) {
 		B base = type.getBase(ingredient);
+		return getFromBase(type, base);
+	}
+
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the base lookup so a read does not race registration.
+	 */
+	@Overwrite
+	@Nullable
+	public <B, I> ISubtypeInterpreter<I> getFromBase(IIngredientTypeWithSubtypes<B, I> type, B ingredientBase) {
 		synchronized (map) {
+			ISubtypeInterpreter<?> interpreter = map.get(ingredientBase);
 			@SuppressWarnings("unchecked")
-			ISubtypeInterpreter<I> cast = (ISubtypeInterpreter<I>) map.get(base);
-			return Optional.ofNullable(cast);
+			ISubtypeInterpreter<I> cast = (ISubtypeInterpreter<I>) interpreter;
+			return cast;
 		}
 	}
 

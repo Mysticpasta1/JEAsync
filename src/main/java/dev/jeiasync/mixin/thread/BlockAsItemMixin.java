@@ -1,11 +1,12 @@
 package dev.jeiasync.mixin.thread;
 
 import dev.jeiasync.MixinApplied;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
-import net.minecraftforge.registries.ForgeRegistries;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
@@ -22,7 +23,7 @@ import java.util.Optional;
  * registry entry has the same problem in the other direction: the block's delegate still returns
  * the old instance, and JEI then reports that instance as missing from the server.
  */
-@Mixin(Block.class)
+@Mixin(value = Block.class, remap = false)
 public abstract class BlockAsItemMixin {
 	@Shadow
 	private Item item;
@@ -50,11 +51,11 @@ public abstract class BlockAsItemMixin {
 
 	private static Item itemWithSameId(Block block) {
 		try {
-			Optional<ResourceKey<Block>> key = ForgeRegistries.BLOCKS.getResourceKey(block);
+			Optional<ResourceKey<Block>> key = BuiltInRegistries.BLOCK.getResourceKey(block);
 			if (key.isEmpty()) {
 				return Items.AIR;
 			}
-			Item item = ForgeRegistries.ITEMS.getValue(key.get().location());
+			Item item = BuiltInRegistries.ITEM.get(ResourceKey.create(Registries.ITEM, key.get().location()));
 			return item == null ? Items.AIR : item;
 		} catch (RuntimeException | LinkageError e) {
 			return Items.AIR;
@@ -63,11 +64,11 @@ public abstract class BlockAsItemMixin {
 
 	private static Item activeItem(Item item) {
 		try {
-			Optional<ResourceKey<Item>> key = ForgeRegistries.ITEMS.getResourceKey(item);
+			Optional<ResourceKey<Item>> key = BuiltInRegistries.ITEM.getResourceKey(item);
 			if (key.isEmpty()) {
 				return item;
 			}
-			Item active = ForgeRegistries.ITEMS.getValue(key.get().location());
+			Item active = BuiltInRegistries.ITEM.get(key.get());
 			if (active == null || active == Items.AIR) {
 				return item;
 			}

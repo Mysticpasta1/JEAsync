@@ -3,16 +3,13 @@
   "minVersion": "0.8",
   "package": "dev.jeiasync.mixin.optional",
   "plugin": "dev.jeiasync.mixin.optional.OptionalModMixinPlugin",
-  "compatibilityLevel": "JAVA_17",
+  "compatibilityLevel": "JAVA_21",
   "refmap": "jeiasync.refmap.json",
   "mixins": [
-    "CheckedThreadLocalRandomMixin",
     "SpawnArmorMaterialMixin",
     "AttributeTierMixin",
-    "JewelryCategoryMixin",
     "CapsulePluginMixin",
     "CulinaryGeneratorTypeMixin",
-    "ConduitFrameMixin",
     "SackColoringMixin",
     "EffectWindowEntryMixin"
   ],

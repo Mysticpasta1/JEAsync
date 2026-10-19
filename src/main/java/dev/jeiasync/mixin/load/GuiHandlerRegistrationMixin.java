@@ -26,7 +26,7 @@ import java.util.Map;
  * and the stream throws {@code ConcurrentModificationException}. The screen-handler map and the
  * global-handler list are plain collections too.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 19.69.0.456.
  */
 @Mixin(value = mezz.jei.library.load.registration.GuiHandlerRegistration.class, remap = false)
 public abstract class GuiHandlerRegistrationMixin {

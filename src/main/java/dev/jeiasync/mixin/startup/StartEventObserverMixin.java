@@ -4,9 +4,10 @@ import dev.jeiasync.JeiLoadProgress;
 import dev.jeiasync.MixinApplied;
 import dev.jeiasync.WorkerEnvironment;
 import mezz.jei.common.Internal;
-import mezz.jei.forge.startup.StartEventObserver;
+import mezz.jei.neoforge.startup.StartEventObserver;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.objectweb.asm.Opcodes;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Coerce;
@@ -34,7 +35,8 @@ import java.lang.reflect.Method;
  * A disconnect during startup is applied after the worker finishes. A restart requested during
  * startup (synced recipes arriving) stops and starts once more on that same worker.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 19.69.0.456. {@code startIfReady} waits on {@code observedRecipeSync} inline.
+ * Treating that flag as already set starts JEI from the login event.
  */
 @Mixin(value = StartEventObserver.class, remap = false)
 public abstract class StartEventObserverMixin {
@@ -42,14 +44,15 @@ public abstract class StartEventObserverMixin {
 	private static boolean notedEarlyStart;
 
 	/**
-	 * {@code startIfReady} returns while it is still waiting on the recipe sync. Skipping that
-	 * wait starts JEI from the login event. The recipe event's restart path is unchanged.
+	 * {@code startIfReady} returns while {@code observedRecipeSync} is still false. Reporting the
+	 * flag as set starts JEI from the login event. The recipe event's restart path is unchanged.
 	 */
 	@Redirect(
 		method = "startIfReady",
 		at = @At(
-			value = "INVOKE",
-			target = "Lmezz/jei/forge/startup/StartEventObserver;shouldWaitForRecipes()Z"
+			value = "FIELD",
+			target = "Lmezz/jei/neoforge/startup/StartEventObserver;observedRecipeSync:Z",
+			opcode = Opcodes.GETFIELD
 		),
 		remap = false
 	)
@@ -138,7 +141,7 @@ public abstract class StartEventObserverMixin {
 
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	private void assignListening() throws ReflectiveOperationException {
-		Class type = Class.forName("mezz.jei.forge.startup.StartEventObserver$State");
+		Class type = Class.forName("mezz.jei.neoforge.startup.StartEventObserver$State");
 		assignState(Enum.valueOf(type, "LISTENING"));
 	}
 

@@ -23,7 +23,7 @@ public class OffThreadUnsafePlugin implements mezz.jei.api.IModPlugin {
 
 	@Override
 	public ResourceLocation getPluginUid() {
-		return new ResourceLocation("loadtest", "off_thread_unsafe");
+		return ResourceLocation.fromNamespaceAndPath("loadtest", "off_thread_unsafe");
 	}
 
 	@Override

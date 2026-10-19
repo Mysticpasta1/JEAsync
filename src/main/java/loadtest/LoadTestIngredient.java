@@ -57,7 +57,7 @@ public final class LoadTestIngredient {
 
 		@Override
 		public ResourceLocation getResourceLocation(String ingredient) {
-			return new ResourceLocation("jeiasync_loadtest", "synthetic");
+			return ResourceLocation.fromNamespaceAndPath("jeiasync_loadtest", "synthetic");
 		}
 
 		@Override

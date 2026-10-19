@@ -1,0 +1,44 @@
+modLoader="javafml"
+loaderVersion="${loader_version_range}"
+license="${mod_license}"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+description='''
+Mixin-based add-on for JEI. Not a fork: it requires upstream JEI and patches it at runtime with
+mixins, running plugin registration off the main thread to speed up startup.
+'''
+
+[[mixins]]
+config="jeiasync.mixins.json"
+
+[[mixins]]
+config="jeiasync.compat.mixins.json"
+
+[[mixins]]
+config="jeiasync.optional.mixins.json"
+
+[[dependencies.${mod_id}]]
+    modId="neoforge"
+    type="required"
+    versionRange="${neo_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="minecraft"
+    type="required"
+    versionRange="${minecraft_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+# Pinned tightly: the mixins overwrite internal methods that JEI's API contract
+# does not cover, so a different JEI release is not safe to load against.
+[[dependencies.${mod_id}]]
+    modId="jei"
+    type="required"
+    versionRange="${jei_version_range}"
+    ordering="AFTER"
+    side="BOTH"

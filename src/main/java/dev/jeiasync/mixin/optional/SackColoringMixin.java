@@ -16,7 +16,7 @@ import org.spongepowered.asm.mixin.injection.Redirect;
 public abstract class SackColoringMixin {
 	@Redirect(
 		method = "makeSackColoringRecipes",
-		at = @At(value = "INVOKE", target = "Lnet/minecraft/world/item/Item;m_7968_()Lnet/minecraft/world/item/ItemStack;"),
+		at = @At(value = "INVOKE", target = "Lnet/minecraft/world/item/Item;getDefaultInstance()Lnet/minecraft/world/item/ItemStack;"),
 		remap = false,
 		require = 0
 	)

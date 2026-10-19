@@ -1,6 +1,6 @@
 package dev.jeiasync;
 
-import net.minecraftforge.common.ForgeConfigSpec;
+import net.neoforged.neoforge.common.ModConfigSpec;
 
 /**
  * Client config. Plugin registration always runs off the render thread.
@@ -8,11 +8,11 @@ import net.minecraftforge.common.ForgeConfigSpec;
  * A {@code -Djeiasync.*} property overrides the file. See {@link AsyncConfig}.
  */
 public final class JeiAsyncConfig {
-	public static final ForgeConfigSpec SPEC;
+	public static final ModConfigSpec SPEC;
 	public static final Common COMMON;
 
 	static {
-		ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
+		ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
 		builder.comment(
 			"Plugin registration runs off the render thread.",
 			"A container opened before it finishes shows a progress bar.",
@@ -27,10 +27,10 @@ public final class JeiAsyncConfig {
 	}
 
 	public static class Common {
-		public final ForgeConfigSpec.IntValue threads;
-		public final ForgeConfigSpec.IntValue recipeRowCapacity;
+		public final ModConfigSpec.IntValue threads;
+		public final ModConfigSpec.IntValue recipeRowCapacity;
 
-		Common(ForgeConfigSpec.Builder builder) {
+		Common(ModConfigSpec.Builder builder) {
 			threads = builder
 				.comment("Worker threads. 0 uses the processor count, and at least 2.")
 				.defineInRange("threads", 0, 0, 256);

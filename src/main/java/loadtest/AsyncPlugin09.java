@@ -10,7 +10,7 @@ public class AsyncPlugin09 implements dev.jeiasync.api.IAsyncCompatiblePlugin {
 
 	@Override
 	public ResourceLocation getPluginUid() {
-		return new ResourceLocation("loadtest", "async09");
+		return ResourceLocation.fromNamespaceAndPath("loadtest", "async09");
 	}
 
 	@Override

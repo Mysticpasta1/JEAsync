@@ -15,7 +15,7 @@ import java.util.Map;
 /**
  * Writes the block-to-item map under {@link BlockItemMapLock}.
  */
-@Mixin(BlockItem.class)
+@Mixin(value = BlockItem.class, remap = false)
 public abstract class BlockItemMapMixin {
 	@Inject(method = "registerBlocks", at = @At("HEAD"), cancellable = true)
 	private void jeiasync$lockedRegister(Map<Block, Item> map, Item item, CallbackInfo ci) {

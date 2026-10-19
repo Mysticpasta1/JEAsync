@@ -4,12 +4,6 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Optional;
 
-import com.lingmu0.JeiPlusPlusMod.JeiPlusPlusConfig;
-import com.lingmu0.JeiPlusPlusMod.client.CreativeTabBar;
-import com.lingmu0.JeiPlusPlusMod.client.IngredientListFeatureSource;
-import com.lingmu0.JeiPlusPlusMod.client.RecipeTreeOverlay;
-import com.lingmu0.JeiPlusPlusMod.client.RecipeTreeScreen;
-import com.lingmu0.JeiPlusPlusMod.client.RecipeTreeSession;
 import mezz.jei.common.input.IInputTarget;
 import mezz.jei.common.input.IInternalKeyMappings;
 import mezz.jei.common.input.UserInput;
@@ -22,13 +16,29 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 
 /**
- * Connects JEI++ 1.0.7 GUI hooks to the input targets JEI 15.71 actually returns.
- * Forge builds those screens on a JEI Async thread. The wrappers only allocate handlers there.
+ * Connects JEI++ GUI hooks to the input targets JEI returns.
+ * <p>
+ * JEI++ is not a compile dependency. Every call into it goes through reflection and does nothing
+ * when that mod is absent. The wrappers only allocate handlers; they do not touch the render thread's
+ * ingredient list.
  */
 public final class JeiPlusPlusBridge {
+	private static final String CREATIVE_TAB_BAR = "com.lingmu0.JeiPlusPlusMod.client.CreativeTabBar";
+	private static final String FEATURE_SOURCE = "com.lingmu0.JeiPlusPlusMod.client.IngredientListFeatureSource";
+	private static final String RECIPE_TREE_OVERLAY = "com.lingmu0.JeiPlusPlusMod.client.RecipeTreeOverlay";
+	private static final String RECIPE_TREE_SCREEN = "com.lingmu0.JeiPlusPlusMod.client.RecipeTreeScreen";
+	private static final String RECIPE_TREE_SESSION = "com.lingmu0.JeiPlusPlusMod.client.RecipeTreeSession";
+	private static final String CONFIG = "com.lingmu0.JeiPlusPlusMod.JeiPlusPlusConfig";
+
 	private static volatile Method creativeClick;
 	private static volatile Method creativeScroll;
+	private static volatile Method creativeArea;
+	private static volatile Method recipeTreeClick;
+	private static volatile Method sessionClear;
+	private static volatile Class<?> featureSourceType;
+	private static volatile Class<?> recipeTreeScreenType;
 	private static volatile boolean creativeReady;
+	private static volatile boolean reflectionReady;
 
 	private JeiPlusPlusBridge() {
 	}
@@ -58,7 +68,17 @@ public final class JeiPlusPlusBridge {
 		if (!user.isMouseInput() || !user.isSimulate()) {
 			return null;
 		}
-		if (!RecipeTreeOverlay.click(recipeLayouts, user.getMouseX(), user.getMouseY(), user.getKey().getValue())) {
+		prepareReflection();
+		Method click = recipeTreeClick;
+		if (click == null) {
+			return null;
+		}
+		try {
+			Object handled = click.invoke(null, recipeLayouts, user.getMouseX(), user.getMouseY(), user.getKey().getValue());
+			if (!Boolean.TRUE.equals(handled)) {
+				return null;
+			}
+		} catch (ReflectiveOperationException ignored) {
 			return null;
 		}
 		return Optional.of((IInputInteraction) ignored -> {
@@ -66,8 +86,15 @@ public final class JeiPlusPlusBridge {
 	}
 
 	private static boolean recipeTreeEnabled() {
-		Object value = JeiPlusPlusConfig.RECIPE_TREE_ENABLED.get();
-		return value instanceof Boolean enabled && enabled;
+		prepareReflection();
+		try {
+			Class<?> config = Class.forName(CONFIG);
+			Object holder = config.getField("RECIPE_TREE_ENABLED").get(null);
+			Object value = holder.getClass().getMethod("get").invoke(holder);
+			return Boolean.TRUE.equals(value);
+		} catch (ReflectiveOperationException ignored) {
+			return false;
+		}
 	}
 
 	private static boolean hasValidScreen(Object overlay) {
@@ -101,6 +128,26 @@ public final class JeiPlusPlusBridge {
 		return null;
 	}
 
+	private static void prepareReflection() {
+		if (reflectionReady) {
+			return;
+		}
+		synchronized (JeiPlusPlusBridge.class) {
+			if (reflectionReady) {
+				return;
+			}
+			featureSourceType = load(FEATURE_SOURCE);
+			recipeTreeScreenType = load(RECIPE_TREE_SCREEN);
+			Class<?> overlay = load(RECIPE_TREE_OVERLAY);
+			recipeTreeClick = findMethod(overlay, "click", 4);
+			Class<?> session = load(RECIPE_TREE_SESSION);
+			sessionClear = findMethod(session, "clear", 0);
+			Class<?> bar = load(CREATIVE_TAB_BAR);
+			creativeArea = findMethod(bar, "getArea", 2);
+			reflectionReady = true;
+		}
+	}
+
 	private static void prepareCreativeTabs() {
 		if (creativeReady) {
 			return;
@@ -109,8 +156,10 @@ public final class JeiPlusPlusBridge {
 			if (creativeReady) {
 				return;
 			}
+			prepareReflection();
 			try {
-				for (Method method : CreativeTabBar.class.getDeclaredMethods()) {
+				Class<?> bar = Class.forName(CREATIVE_TAB_BAR);
+				for (Method method : bar.getDeclaredMethods()) {
 					if ("handleClick".equals(method.getName()) && method.getParameterCount() == 3) {
 						method.setAccessible(true);
 						creativeClick = method;
@@ -127,14 +176,46 @@ public final class JeiPlusPlusBridge {
 		}
 	}
 
-	private static IngredientListFeatureSource featureSource(Object grid) {
+	private static Class<?> load(String name) {
+		try {
+			return Class.forName(name);
+		} catch (ClassNotFoundException ignored) {
+			return null;
+		}
+	}
+
+	private static Method findMethod(Class<?> type, String name, int parameters) {
+		if (type == null) {
+			return null;
+		}
+		for (Method method : type.getDeclaredMethods()) {
+			if (name.equals(method.getName()) && method.getParameterCount() == parameters) {
+				method.setAccessible(true);
+				return method;
+			}
+		}
+		for (Method method : type.getMethods()) {
+			if (name.equals(method.getName()) && method.getParameterCount() == parameters) {
+				method.setAccessible(true);
+				return method;
+			}
+		}
+		return null;
+	}
+
+	private static Object featureSource(Object grid) {
+		prepareReflection();
+		Class<?> type = featureSourceType;
+		if (type == null) {
+			return null;
+		}
 		try {
 			Field field = findField(grid.getClass(), "ingredientSource");
 			if (field == null) {
 				return null;
 			}
 			Object value = field.get(grid);
-			return value instanceof IngredientListFeatureSource source ? source : null;
+			return type.isInstance(value) ? value : null;
 		} catch (IllegalAccessException ignored) {
 			return null;
 		}
@@ -144,10 +225,20 @@ public final class JeiPlusPlusBridge {
 		if (!(grid instanceof IngredientGridWithNavigation navigation)) {
 			return ImmutableRect2i.EMPTY;
 		}
-		return CreativeTabBar.getArea(navigation.getBackgroundArea(), navigation.getBackButtonArea());
+		prepareReflection();
+		Method area = creativeArea;
+		if (area == null) {
+			return ImmutableRect2i.EMPTY;
+		}
+		try {
+			Object result = area.invoke(null, navigation.getBackgroundArea(), navigation.getBackButtonArea());
+			return result instanceof ImmutableRect2i rect ? rect : ImmutableRect2i.EMPTY;
+		} catch (ReflectiveOperationException ignored) {
+			return ImmutableRect2i.EMPTY;
+		}
 	}
 
-	private static boolean creativeClick(IngredientListFeatureSource source, ImmutableRect2i area, UserInput input) {
+	private static boolean creativeClick(Object source, ImmutableRect2i area, UserInput input) {
 		prepareCreativeTabs();
 		Method method = creativeClick;
 		if (method == null) {
@@ -160,7 +251,7 @@ public final class JeiPlusPlusBridge {
 		}
 	}
 
-	private static boolean creativeScroll(IngredientListFeatureSource source, ImmutableRect2i area, double mouseX, double mouseY, double scrollY) {
+	private static boolean creativeScroll(Object source, ImmutableRect2i area, double mouseX, double mouseY, double scrollY) {
 		prepareCreativeTabs();
 		Method method = creativeScroll;
 		if (method == null || scrollY == 0) {
@@ -172,6 +263,25 @@ public final class JeiPlusPlusBridge {
 		} catch (ReflectiveOperationException ignored) {
 			return false;
 		}
+	}
+
+	private static void clearSession() {
+		prepareReflection();
+		Method clear = sessionClear;
+		if (clear == null) {
+			return;
+		}
+		try {
+			clear.invoke(null);
+		} catch (ReflectiveOperationException ignored) {
+			// The session class is absent or renamed. The screen close below still runs.
+		}
+	}
+
+	private static boolean isRecipeTreeScreen(Object screen) {
+		prepareReflection();
+		Class<?> type = recipeTreeScreenType;
+		return type != null && type.isInstance(screen);
 	}
 
 	private static final class ChoosingTarget implements IInputTarget {
@@ -206,7 +316,7 @@ public final class JeiPlusPlusBridge {
 			if (!recipeTreeEnabled()) {
 				return original;
 			}
-			if (Minecraft.getInstance().screen instanceof RecipeTreeScreen) {
+			if (isRecipeTreeScreen(Minecraft.getInstance().screen)) {
 				return tree;
 			}
 			return hasValidScreen(overlay) ? both : original;
@@ -240,9 +350,9 @@ public final class JeiPlusPlusBridge {
 			if (input.isSimulate()) {
 				return;
 			}
-			RecipeTreeSession.clear();
-			if (screen instanceof RecipeTreeScreen treeScreen) {
-				treeScreen.onClose();
+			clearSession();
+			if (isRecipeTreeScreen(screen)) {
+				screen.onClose();
 			}
 		}
 	}
@@ -258,7 +368,7 @@ public final class JeiPlusPlusBridge {
 
 		@Override
 		public Optional<IInputInteraction> beginInput(Screen screen, UserInput input, IInternalKeyMappings keys) {
-			IngredientListFeatureSource source = featureSource(grid);
+			Object source = featureSource(grid);
 			ImmutableRect2i area = gridArea(grid);
 			if (source != null && creativeClick(source, area, input)) {
 				return Optional.of(execute -> {
@@ -272,7 +382,7 @@ public final class JeiPlusPlusBridge {
 
 		@Override
 		public boolean scroll(double mouseX, double mouseY, double scrollX, double scrollY) {
-			IngredientListFeatureSource source = featureSource(grid);
+			Object source = featureSource(grid);
 			if (source != null && creativeScroll(source, gridArea(grid), mouseX, mouseY, scrollY)) {
 				return true;
 			}

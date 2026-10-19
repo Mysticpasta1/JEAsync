@@ -3,7 +3,6 @@ package dev.jeiasync.mixin.optional;
 import java.util.List;
 import java.util.Set;
 
-import dev.jeiasync.compat.JewelryCategoryBridge;
 import dev.jeiasync.compat.MekanismRecipeTypeLock;
 import org.objectweb.asm.tree.ClassNode;
 import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
@@ -42,7 +41,6 @@ public final class OptionalModMixinPlugin implements IMixinConfigPlugin {
 		if ("mekanism.client.jei.MekanismJEIRecipeType".equals(targetClassName)) {
 			MekanismRecipeTypeLock.apply(targetClass);
 		}
-		JewelryCategoryBridge.prepare(targetClass);
 	}
 
 	@Override

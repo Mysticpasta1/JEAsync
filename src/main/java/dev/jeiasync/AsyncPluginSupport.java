@@ -93,6 +93,30 @@ public final class AsyncPluginSupport {
     }
 
     /**
+     * The plugin pool is created while JEI's constructor is still running, before the client
+     * config file is loaded, so it starts at the spec default. Once the file is in, match it.
+     * Increasing the maximum first keeps {@link ThreadPoolExecutor} from rejecting the new size.
+     */
+    public static void applyConfiguredThreads() {
+        synchronized (AsyncPluginSupport.class) {
+            if (!(executor instanceof ThreadPoolExecutor pool) || pool.isShutdown()) {
+                return;
+            }
+            int count = AsyncConfig.getThreadCount();
+            if (pool.getCorePoolSize() == count && pool.getMaximumPoolSize() == count) {
+                return;
+            }
+            if (count > pool.getMaximumPoolSize()) {
+                pool.setMaximumPoolSize(count);
+            }
+            pool.setCorePoolSize(count);
+            if (pool.getMaximumPoolSize() != count) {
+                pool.setMaximumPoolSize(count);
+            }
+        }
+    }
+
+    /**
      * A single-threaded executor for JEI's own startup, separate from the plugin pool.
      * <p>
      * Single-threaded on purpose: {@code startRunnable} is one sequential unit of work, and running

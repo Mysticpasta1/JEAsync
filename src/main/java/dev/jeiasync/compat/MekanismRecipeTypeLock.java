@@ -23,24 +23,34 @@ import org.objectweb.asm.tree.ClassNode;
 public final class MekanismRecipeTypeLock {
 	private static final Logger LOGGER = LogManager.getLogger();
 	private static final String OWNER = "mekanism/client/jei/MekanismJEIRecipeType";
-	private static final String INIT = "(Lnet/minecraftforge/common/util/Lazy;Ljava/lang/Class;)V";
+	private static final String LAZY_NEOFORGE = "net/neoforged/neoforge/common/util/Lazy";
+	private static final String LAZY_FORGE = "net/minecraftforge/common/util/Lazy";
 
 	private MekanismRecipeTypeLock() {
 	}
 
 	public static void apply(ClassNode classNode) {
 		MethodNode findType = find(classNode, "findType", null);
-		MethodNode init = find(classNode, "<init>", INIT);
+		String lazy = LAZY_NEOFORGE;
+		MethodNode init = find(classNode, "<init>", initDesc(lazy));
+		if (init == null) {
+			lazy = LAZY_FORGE;
+			init = find(classNode, "<init>", initDesc(lazy));
+		}
 		if (findType == null || init == null) {
 			LOGGER.warn("JEI Async: Mekanism recipe type lock skipped; the class shape changed");
 			return;
 		}
 		findType.access |= Opcodes.ACC_SYNCHRONIZED;
-		lockConstructor(init);
+		lockConstructor(init, lazy);
 		LOGGER.info("JEI Async: Mekanism JEI recipe types register under one lock");
 	}
 
-	private static void lockConstructor(MethodNode init) {
+	private static String initDesc(String lazy) {
+		return "(L" + lazy + ";Ljava/lang/Class;)V";
+	}
+
+	private static void lockConstructor(MethodNode init, String lazy) {
 		LabelNode start = new LabelNode();
 		LabelNode end = new LabelNode();
 		LabelNode handler = new LabelNode();
@@ -81,7 +91,7 @@ public final class MekanismRecipeTypeLock {
 		insns.add(after);
 		insns.add(new VarInsnNode(Opcodes.ALOAD, 0));
 		insns.add(new VarInsnNode(Opcodes.ALOAD, 1));
-		insns.add(new FieldInsnNode(Opcodes.PUTFIELD, OWNER, "lazyUid", "Lnet/minecraftforge/common/util/Lazy;"));
+		insns.add(new FieldInsnNode(Opcodes.PUTFIELD, OWNER, "lazyUid", "L" + lazy + ";"));
 		insns.add(new VarInsnNode(Opcodes.ALOAD, 0));
 		insns.add(new VarInsnNode(Opcodes.ALOAD, 2));
 		insns.add(new FieldInsnNode(Opcodes.PUTFIELD, OWNER, "recipeClass", "Ljava/lang/Class;"));

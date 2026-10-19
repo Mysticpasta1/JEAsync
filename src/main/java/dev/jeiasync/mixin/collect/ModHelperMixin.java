@@ -8,7 +8,7 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Makes {@link mezz.jei.forge.platform.ModHelper} safe for concurrent plugin registration.
+ * Makes {@link mezz.jei.neoforge.platform.ModHelper} safe for concurrent plugin registration.
  * <p>
  * Both of its caches are plain {@code HashMap}s populated through {@code computeIfAbsent}, and they
  * are read while building ingredient display names, which happens during registration.
@@ -20,9 +20,9 @@ import java.util.Optional;
  * {@code ConcurrentHashMap}; each compute is instead done under its own map's monitor. The icon
  * cache was added in 15.62 and needs the same treatment as the name cache.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 19.69.0.456.
  */
-@Mixin(value = mezz.jei.forge.platform.ModHelper.class, remap = false)
+@Mixin(value = mezz.jei.neoforge.platform.ModHelper.class, remap = false)
 public abstract class ModHelperMixin {
 	@Shadow
 	private Map<String, String> cache;

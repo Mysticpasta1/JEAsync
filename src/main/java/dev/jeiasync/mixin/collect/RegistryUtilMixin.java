@@ -22,7 +22,7 @@ import java.util.Map;
  * {@code HashMap} does not survive. The lock is the class, and {@link #getRegistryUncached} takes
  * it again through {@link #getRegistryAccess}, which is safe because {@code synchronized} reenters.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 19.69.0.456.
  */
 @Mixin(value = RegistryUtil.class, remap = false)
 public abstract class RegistryUtilMixin {

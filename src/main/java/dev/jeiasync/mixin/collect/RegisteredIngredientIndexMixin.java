@@ -25,7 +25,7 @@ import java.util.Optional;
  * <p>
  * Lookups return a snapshot taken under the lock. The uid computation stays outside it.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 19.69.0.456.
  */
 @Mixin(targets = "mezz.jei.library.ingredients.RegisteredIngredientIndex", remap = false)
 public abstract class RegisteredIngredientIndexMixin<T> {
@@ -140,7 +140,7 @@ public abstract class RegisteredIngredientIndexMixin<T> {
 	 * @reason Search a snapshot so the legacy uid walk does not use the live iterator.
 	 */
 	@Overwrite
-	public Optional<ITypedIngredient<T>> getByUid(String uid) {
+	public Optional<ITypedIngredient<T>> getByLegacyUid(String uid) {
 		List<ITypedIngredient<T>> snapshot;
 		synchronized (this) {
 			ITypedIngredient<T> ingredient = ingredientsByUid.get(uid);

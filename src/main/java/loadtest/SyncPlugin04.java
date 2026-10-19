@@ -15,7 +15,7 @@ public class SyncPlugin04 implements dev.jeiasync.api.IAsyncCompatiblePlugin {
 
 	@Override
 	public ResourceLocation getPluginUid() {
-		return new ResourceLocation("loadtest", "sync04");
+		return ResourceLocation.fromNamespaceAndPath("loadtest", "sync04");
 	}
 
 	@Override

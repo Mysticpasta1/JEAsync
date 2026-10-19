@@ -1,7 +1,7 @@
 package dev.jeiasync;
 
-import net.minecraftforge.fml.loading.FMLEnvironment;
-import net.minecraftforge.fml.util.thread.SidedThreadGroups;
+import net.neoforged.fml.loading.FMLEnvironment;
+import net.neoforged.fml.util.thread.SidedThreadGroups;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -69,7 +69,7 @@ public final class WorkerEnvironment {
 	}
 
 	/**
-	 * Thread group for a worker. {@link net.minecraftforge.fml.util.thread.EffectiveSide} reads the
+	 * Thread group for a worker. {@link net.neoforged.fml.util.thread.EffectiveSide} reads the
 	 * group, and a worker left in the submitting thread's group is reported as the client even on a
 	 * dedicated server.
 	 */
@@ -81,8 +81,9 @@ public final class WorkerEnvironment {
 	}
 
 	/**
-	 * Context loader to hand Forge's event transformer when the calling thread does not already
-	 * have one that can see the game.
+	 * Context loader for a thread that does not already see the game. NeoForge defines event
+	 * listeners with a hidden class on the bus lookup, so this is no longer handed to an event
+	 * subclass transformer. Callers that still need a game-visible loader use it directly.
 	 */
 	public static ClassLoader loaderForEvents(ClassLoader threadLoader) {
 		ClassLoader game = gameLoader;

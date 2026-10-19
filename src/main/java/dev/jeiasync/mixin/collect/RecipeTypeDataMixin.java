@@ -29,7 +29,7 @@ import java.util.Set;
  * make the render thread throw {@code ConcurrentModificationException}, and holding the monitor
  * cannot prevent that because the caller iterates after this returns.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 19.69.0.456.
  */
 @Mixin(value = mezz.jei.library.recipes.collect.RecipeTypeData.class, remap = false)
 public abstract class RecipeTypeDataMixin<T> {

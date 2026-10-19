@@ -15,6 +15,7 @@ import mezz.jei.gui.ingredients.IListElementInfo;
 import mezz.jei.gui.search.ElementSearch;
 import mezz.jei.gui.search.ElementPrefixParser;
 import mezz.jei.gui.search.ElementSearchIndex;
+import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
@@ -25,7 +26,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -55,7 +55,7 @@ import java.util.Set;
  * redirected onto the same monitor as the lookups. See
  * {@link dev.jeiasync.mixin.collect.IngredientSetMixin} for the same trade on the other class.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 19.69.0.456.
  */
 @Mixin(value = ElementSearch.class, remap = false)
 public abstract class ElementSearchMixin {
@@ -218,8 +218,9 @@ public abstract class ElementSearchMixin {
 	 * @reason Lock the element map so a lookup does not race an add.
 	 */
 	@Overwrite
+	@Nullable
 	@SuppressWarnings("unchecked")
-	public <T> Optional<IListElement<T>> findElement(ITypedIngredient<T> ingredient, IIngredientHelper<T> ingredientHelper) {
+	public <T> IListElement<T> findElement(ITypedIngredient<T> ingredient, IIngredientHelper<T> ingredientHelper) {
 		Object uniqueId = ingredientHelper.getUid(ingredient, UidContext.Ingredient);
 
 		IListElement<?> element;
@@ -227,9 +228,9 @@ public abstract class ElementSearchMixin {
 			element = allElements.get(uniqueId);
 		}
 		if (element != null && element.getTypedIngredient().getType().equals(ingredient.getType())) {
-			return Optional.of((IListElement<T>) element);
+			return (IListElement<T>) element;
 		}
-		return Optional.empty();
+		return null;
 	}
 
 	/**

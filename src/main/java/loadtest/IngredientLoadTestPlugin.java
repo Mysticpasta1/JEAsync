@@ -29,7 +29,7 @@ public class IngredientLoadTestPlugin implements mezz.jei.api.IModPlugin {
 
 	@Override
 	public ResourceLocation getPluginUid() {
-		return new ResourceLocation("loadtest", "ingredients");
+		return ResourceLocation.fromNamespaceAndPath("loadtest", "ingredients");
 	}
 
 	@Override

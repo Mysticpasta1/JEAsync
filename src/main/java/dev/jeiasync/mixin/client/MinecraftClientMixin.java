@@ -26,7 +26,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * not redirected; they observe the same objects the accessors pulled, because the pull stores those
  * references rather than copies.
  */
-@Mixin(Minecraft.class)
+@Mixin(value = Minecraft.class, remap = false)
 public abstract class MinecraftClientMixin {
 	@Inject(method = "getResourceManager", at = @At("HEAD"), cancellable = true)
 	private void jeiasync$resourceManager(CallbackInfoReturnable<ResourceManager> cir) {

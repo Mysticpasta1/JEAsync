@@ -1,14 +1,14 @@
 # JEI Async
 
-A Forge **1.20.1** add-on that speeds up [JustEnoughItems](https://www.curseforge.com/minecraft/mc-mods/jei)
+A NeoForge **1.21.1** add-on that speeds up [JustEnoughItems](https://www.curseforge.com/minecraft/mc-mods/jei)
 startup by running plugin registration off the main thread.
 
 This is **not** a fork of JEI. It depends on a published JEI release as an ordinary dependency and
 patches it at runtime with mixins.
 
 - **Mod id:** `jeiasync`
-- **Targets:** Minecraft 1.20.1, Forge 47.x, JEI `15.71.0.224`
-- **Java:** 17
+- **Targets:** Minecraft 1.21.1, NeoForge 21.1.264, JEI `19.69.0.456`
+- **Java:** 21
 
 ## Performance, measured
 
@@ -121,10 +121,11 @@ at once is not something this add-on is prepared to assume is safe.
 
 The mixins overwrite internal methods (`RecipeManager.addRecipes`, `ErrorUtil.assertMainThread`,
 `PluginCaller.callOnPlugins`, and a set of collection classes) and read internal fields by name.
-None of that is covered by JEI's API contract, so it is not stable across releases - 15.32 to 15.71
-moved `mezz.jei.core` to `mezz.jei.common`, rewrote the recipe index behind a new
-`IngredientUidIndex`, and replaced the two search-dirty booleans with an enum set. `mods.toml`
-therefore pins `[15.71.0.224,15.72)` rather than tracking the latest JEI.
+None of that is covered by JEI's API contract, so it is not stable across releases. From 15.32 to
+15.71, JEI moved `mezz.jei.core` to `mezz.jei.common`, rewrote the recipe index behind
+`IngredientUidIndex`, and replaced the two search-dirty booleans with an enum set. 19.69 removed
+`ElementSearchLowMem` and the generic recipe-extension helper. `neoforge.mods.toml` therefore pins
+`[19.69.0.456,19.70)` rather than tracking the latest JEI.
 
 Two of the mixins have to be compiled *in JEI's own package*, because they name package-private
 types: `IngredientUidIndex` is the backing store for both `IngredientToRecipesMap` and `RecipeMap`,
@@ -242,13 +243,10 @@ cancellation points.
 `rebuildItemFilter` is dispatched to a worker as well, with its own dedupe state separate from query
 filtering, since only one index build is ever useful at a time.
 
-Since 15.71 there are two kinds of dirt, and they are handled differently. Switching the search
-implementation dirties everything and is handled by the full async `rebuildItemFilter`. A config
-change to one search index dirties only that index, and upstream handles it by calling
-`rebuildSearchIndexes` for the affected subset - that one stays synchronous, because it is cheap, and
-because making it async would mean a config change could not be observed until a later frame.
-`updateDirtyState` walks the ingredient list at most once either way, sharing the rebuilt
-`IListElementInfo` list between the two paths.
+JEI 19.69 has one search class, `ElementSearch`. Alias changes, updated ingredients, and a config
+change to one search index are refreshed off the render thread through `elementSearch.update`.
+A sort change updates the comparator the same way. `rebuildItemFilter` still rebuilds the whole
+index on a worker. `updateDirtyState` does not walk the ingredient list on the render thread.
 
 ## Configuration
 
@@ -297,20 +295,17 @@ because its plugins are synthetic sleepers.
 ./gradlew build
 ```
 
-`./gradlew runClient` and `./gradlew runServer` launch a dev environment. JEI is declared with
-ForgeGradle's `fg.deobf`, because the published JEI jar is compiled against SRG while dev runs use
-Mojang mappings.
+`./gradlew runClient` and `./gradlew runServer` launch a dev environment. NeoForge 1.21.1 and JEI
+19.69 both use Mojmap, in dev and in production.
 
 ### The benchmark plugins never ship
 
 The synthetic plugins used to measure startup (`loadtest.*`, 60 of them) live in the main source
-set, because that is where Forge's annotation processor has to see them for the annotation scan
-data to be generated. The shipping jar excludes them.
+set. The shipping jar excludes them.
 
-That exclusion is verified rather than trusted, because the failure mode is quiet. JEI finds
-plugins through Forge's annotation scan data rather than by looking for classes on the classpath, so
-a leftover scan-data entry naming a class that is no longer in the jar would make JEI try to load
-it - a startup error at best, and at worst a plugin that half-registers. `verifyNoBenchmarkPlugins`
+That exclusion is verified rather than trusted, because the failure mode is quiet. JEI loads
+plugins it finds in the mod jar, so a leftover benchmark class would be registered - a startup
+error at best, and at worst a plugin that half-registers. `verifyNoBenchmarkPlugins`
 therefore opens the built jar and scans every class file for the benchmark package name, which
 appears in the constant pool of anything that mentions it. Any hit fails the build, and the task
 runs as part of `check`.

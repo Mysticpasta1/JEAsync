@@ -1,6 +1,6 @@
 package dev.jeiasync;
 
-import net.minecraftforge.fml.loading.FMLEnvironment;
+import net.neoforged.fml.loading.FMLEnvironment;
 
 import java.lang.reflect.Method;
 import java.util.concurrent.CompletableFuture;

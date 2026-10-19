@@ -1,37 +1,72 @@
 plugins {
-    id 'java'
+    id 'java-library'
+    id 'maven-publish'
     id 'idea'
-    id 'eclipse'
-    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
-    id 'org.spongepowered.mixin' version '0.7.+'
+    id 'net.neoforged.moddev' version '2.0.148'
 }
 
-group = project.modGroup
-version = project.modVersion
-
-def minecraftVersion = project.minecraftVersion
-def modJavaVersion = project.modJavaVersion
+group = project.mod_group
+version = project.mod_version
 
 base {
-    archivesName = "${project.modId}-${project.modFlavor}-${minecraftVersion}-forge"
+    archivesName = "${project.mod_id}-${project.mod_flavor}-${project.minecraft_version}-neoforge"
 }
 
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(modJavaVersion)
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
+
+neoForge {
+    version = project.neo_version
+
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
+    }
+
+    runs {
+        client {
+            client()
+            gameDirectory = project.file('run/client')
+            if (project.hasProperty('quickPlayServer')) {
+                programArgument '--quickPlayMultiplayer'
+                programArgument project.property('quickPlayServer').toString()
+            }
+        }
+
+        server {
+            server()
+            gameDirectory = project.file('run/server')
+            programArgument '--nogui'
+        }
+
+        configureEach {
+            logLevel = org.slf4j.event.Level.DEBUG
+            def forwardedProperties = [
+                'jeiasync.threads',
+                'jeiasync.recipeRowCapacity',
+                'loadtest.workMs',
+                'loadtest.ingredients',
+                'loadtest.ingredientBlocks'
+            ]
+            forwardedProperties.each { key ->
+                if (project.hasProperty(key)) {
+                    systemProperty key, project.property(key)
+                }
+            }
+        }
+    }
+
+    mods {
+        "${project.mod_id}" {
+            sourceSet(sourceSets.main)
+        }
     }
 }
 
-minecraft {
-    mappings 'official', minecraftVersion
-    copyIdeResources = true
+configurations {
+    runtimeClasspath.extendsFrom localRuntime
 }
 
 repositories {
-    maven {
-        name = 'Forge'
-        url = 'https://maven.minecraftforge.net'
-    }
     maven {
         name = 'JEI'
         url = 'https://maven.blamejared.com'
@@ -47,55 +82,63 @@ repositories {
             includeGroup 'org.spongepowered'
         }
     }
-    maven {
-        name = 'CurseMaven'
-        url = 'https://cursemaven.com'
-        content {
-            includeGroup 'curse.maven'
-        }
-    }
 }
+
+def minecraftVersion = project.minecraft_version
+def jeiVersion = project.jei_version
 
 dependencies {
-    minecraft "net.minecraftforge:forge:${minecraftVersion}-${project.forgeVersion}"
-    implementation fg.deobf("mezz.jei:jei-${minecraftVersion}-forge:${project.jeiVersion}")
-    compileOnly fg.deobf("curse.maven:jei-plus-plus-1645653:9060789")
-    compileOnly 'org.spongepowered:mixin:0.8.5'
+    // compileOnly is not transitive. The mixins touch JEI internals, so each jar is listed.
+    compileOnly "mezz.jei:jei-${minecraftVersion}-neoforge:${jeiVersion}"
+    compileOnly "mezz.jei:jei-${minecraftVersion}-common:${jeiVersion}"
+    compileOnly "mezz.jei:jei-${minecraftVersion}-lib:${jeiVersion}"
+    compileOnly "mezz.jei:jei-${minecraftVersion}-gui:${jeiVersion}"
+    compileOnly "mezz.jei:jei-${minecraftVersion}-common-api:${jeiVersion}"
+    compileOnly "mezz.jei:jei-${minecraftVersion}-neoforge-api:${jeiVersion}"
+    compileOnly 'net.mezzdev.config:mezz_config-1.21.1-neoforge:0.6.3'
+    localRuntime "mezz.jei:jei-${minecraftVersion}-neoforge:${jeiVersion}"
+
+    // NeoForge already supplies sponge-mixin, whose CompatibilityLevel includes JAVA_21.
+    // A direct Mixin 0.8.5 jar hides that enum and stops at JAVA_18.
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+    annotationProcessor files('src/main/resources')
 }
 
-mixin {
-    add sourceSets.main, 'jeiasync.refmap.json'
-    config 'jeiasync.mixins.json'
-    config 'jeiasync.compat.mixins.json'
-    config 'jeiasync.optional.mixins.json'
+def mixinConfigs = 'jeiasync.mixins.json,jeiasync.compat.mixins.json,jeiasync.optional.mixins.json'
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
 }
 
-tasks.named('processResources', ProcessResources) {
-    def props = [
-        forgeLoaderVersionRange: project.forgeLoaderVersionRange,
-        forgeVersionRange    : project.forgeVersionRange,
-        minecraftVersionRange: project.minecraftVersionRange,
-        modGroup             : project.modGroup,
-        modId                : project.modId,
-        modJavaVersion       : project.modJavaVersion,
-        modName              : project.modName,
-        modVersion           : project.modVersion,
-        jeiVersionRange      : project.jeiVersionRange,
+def generateModMetadata = tasks.register('generateModMetadata', ProcessResources) {
+    def replaceProperties = [
+        minecraft_version      : project.minecraft_version,
+        minecraft_version_range: project.minecraft_version_range,
+        neo_version            : project.neo_version,
+        loader_version_range   : project.loader_version_range,
+        neo_version_range      : project.neo_version_range,
+        mod_id                 : project.mod_id,
+        mod_name               : project.mod_name,
+        mod_license            : project.mod_license,
+        mod_version            : project.mod_version,
+        jei_version_range      : project.jei_version_range,
     ]
-    inputs.properties(props)
-    filesMatching('META-INF/mods.toml') {
-        expand(props)
-    }
+    inputs.properties(replaceProperties)
+    expand(replaceProperties)
+    from 'src/main/templates'
+    into layout.buildDirectory.dir('generated/sources/modMetadata')
 }
+
+sourceSets.main.resources.srcDir generateModMetadata
+neoForge.ideSyncTask generateModMetadata
 
 def modManifestAttributes = [
-    'Specification-Title'  : project.modName,
-    'Specification-Version': project.jeiVersionRange,
-    'Implementation-Title' : project.name,
+    'Specification-Title'   : project.mod_name,
+    'Specification-Version' : project.jei_version_range,
+    'Implementation-Title'  : project.name,
     'Implementation-Version': project.version,
-    'Implementation-Vendor': project.modGroup,
-    'MixinConfigs'         : 'jeiasync.mixins.json,jeiasync.compat.mixins.json,jeiasync.optional.mixins.json',
+    'Implementation-Vendor' : project.mod_group,
+    'MixinConfigs'          : mixinConfigs,
 ]
 
 tasks.named('jar', Jar) {
@@ -129,7 +172,7 @@ tasks.register('verifyNoBenchmarkPlugins') {
             throw new GradleException(
                 "The shipping jar contains benchmark plugin material: ${problems.join('; ')}.")
         }
-        logger.lifecycle("Shipping jar is free of benchmark plugins.")
+        logger.lifecycle('Shipping jar is free of benchmark plugins.')
     }
 }
 
@@ -161,36 +204,11 @@ tasks.register('deployBenchmarkJarServer', Copy) {
     into layout.projectDirectory.dir('run/server/mods')
 }
 
-def forwardedProperties = ['jeiasync.threads', 'jeiasync.recipeRowCapacity', 'loadtest.workMs', 'loadtest.ingredients', 'loadtest.ingredientBlocks']
-
-minecraft {
-    runs {
-        client {
-            workingDirectory project.file('run/client')
-            property 'forge.logging.console.level', 'debug'
-            forwardedProperties.each { key ->
-                if (project.hasProperty(key)) {
-                    property key, project.getProperty(key)
-                }
-            }
-            if (project.hasProperty('quickPlayServer')) {
-                args '--quickPlayMultiplayer', project.property('quickPlayServer')
-            }
-        }
-        server {
-            workingDirectory project.file('run/server')
-            property 'forge.logging.console.level', 'debug'
-            forwardedProperties.each { key ->
-                if (project.hasProperty(key)) {
-                    property key, project.getProperty(key)
-                }
-            }
-        }
-    }
-}
-
 idea {
     module {
+        downloadSources = true
+        downloadJavadoc = true
         excludeDirs += files('run', 'out', 'logs').collect { file(it) }
     }
 }
+

@@ -22,7 +22,7 @@ import java.util.Map;
  * recipe map is built from whatever survived, so a plugin that logged a successful category
  * phase later fails with "no recipe category registered".
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 19.69.0.456.
  */
 @Mixin(value = mezz.jei.library.load.registration.RecipeCategoryRegistration.class, remap = false)
 public abstract class RecipeCategoryRegistrationMixin {

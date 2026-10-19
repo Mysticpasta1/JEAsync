@@ -49,7 +49,7 @@ import java.util.function.Consumer;
  * needs the render thread can implement
  * {@link dev.jeiasync.api.IAsyncCompatiblePlugin} and return false.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 19.69.0.456.
  */
 @Mixin(value = mezz.jei.library.load.PluginCaller.class, remap = false, priority = 0)
 public abstract class PluginCallerMixin {

@@ -22,7 +22,7 @@ import java.util.Set;
  * inside a generator. One lock for every tab avoids that without depending on lock order between
  * tabs that call each other.
  */
-@Mixin(CreativeModeTab.class)
+@Mixin(value = CreativeModeTab.class, remap = false)
 public abstract class CreativeModeTabMixin {
 	private static final Logger LOGGER = LogManager.getLogger();
 	private static final Object JEI_ASYNC_BUILD_LOCK = new Object();

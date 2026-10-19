@@ -10,7 +10,7 @@ public class AsyncPlugin11 implements dev.jeiasync.api.IAsyncCompatiblePlugin {
 
 	@Override
 	public ResourceLocation getPluginUid() {
-		return new ResourceLocation("loadtest", "async11");
+		return ResourceLocation.fromNamespaceAndPath("loadtest", "async11");
 	}
 
 	@Override

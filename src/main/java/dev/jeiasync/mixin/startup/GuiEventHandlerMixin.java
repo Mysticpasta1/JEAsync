@@ -16,6 +16,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * <p>
  * The listeners can be registered on the client thread a moment before the overlay has a screen.
  * Drawing or ticking in that window reads layout that {@code onGuiInit} has not filled in.
+ * <p>
+ * Targets upstream 19.69.0.456. Background, container foreground, non-container contents, and the
+ * post-draw tooltips all go through {@code drawForScreenBackground} and {@code drawForScreenForeground}.
  */
 @Mixin(value = GuiEventHandler.class, remap = false)
 public abstract class GuiEventHandlerMixin {
@@ -47,29 +50,15 @@ public abstract class GuiEventHandlerMixin {
 		}
 	}
 
-	@Inject(method = "onDrawBackgroundPost", at = @At("HEAD"), cancellable = true, remap = false)
-	private void jeiasync$holdBackground(GuiGraphics guiGraphics, CallbackInfo ci) {
+	@Inject(method = "drawForScreenBackground", at = @At("HEAD"), cancellable = true, remap = false)
+	private void jeiasync$holdBackground(Screen screen, GuiGraphics guiGraphics, CallbackInfo ci) {
 		if (!JeiLoadProgress.isGuiReady()) {
 			ci.cancel();
 		}
 	}
 
-	@Inject(method = "onDrawForeground", at = @At("HEAD"), cancellable = true, remap = false)
-	private void jeiasync$holdForeground(AbstractContainerScreen<?> screen, GuiGraphics guiGraphics, int mouseX, int mouseY, CallbackInfo ci) {
-		if (!JeiLoadProgress.isGuiReady()) {
-			ci.cancel();
-		}
-	}
-
-	@Inject(method = "onDrawForegroundAtIdentity", at = @At("HEAD"), cancellable = true, remap = false)
-	private void jeiasync$holdForegroundIdentity(GuiGraphics guiGraphics, int mouseX, int mouseY, CallbackInfo ci) {
-		if (!JeiLoadProgress.isGuiReady()) {
-			ci.cancel();
-		}
-	}
-
-	@Inject(method = "onDrawScreenPost", at = @At("HEAD"), cancellable = true, remap = false)
-	private void jeiasync$holdDraw(Screen screen, GuiGraphics guiGraphics, int mouseX, int mouseY, CallbackInfo ci) {
+	@Inject(method = "drawForScreenForeground", at = @At("HEAD"), cancellable = true, remap = false)
+	private void jeiasync$holdForeground(Screen screen, GuiGraphics guiGraphics, int mouseX, int mouseY, CallbackInfo ci) {
 		if (!JeiLoadProgress.isGuiReady()) {
 			ci.cancel();
 		}

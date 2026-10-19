@@ -30,7 +30,7 @@ import java.util.List;
  * in the young generation, so the effect is a small reduction in scavenge pressure rather than in
  * the live set.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 19.69.0.456.
  */
 @Mixin(value = IngredientToRecipesMap.class, remap = false)
 public abstract class IngredientToRecipesMapMixin {

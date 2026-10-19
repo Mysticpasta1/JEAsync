@@ -41,7 +41,7 @@ import java.util.stream.Stream;
  * Every method that touches either one locks on {@code this}. Contention is negligible: these are
  * short reads and small-set updates.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 19.69.0.456.
  */
 @Mixin(value = mezz.jei.library.recipes.RecipeManagerInternal.class, remap = false)
 public abstract class RecipeManagerInternalMixin {

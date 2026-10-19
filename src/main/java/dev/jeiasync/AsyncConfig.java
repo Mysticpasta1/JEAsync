@@ -1,13 +1,15 @@
 package dev.jeiasync;
 
-import net.minecraftforge.common.ForgeConfigSpec;
+import net.neoforged.neoforge.common.ModConfigSpec;
 
 /**
  * Effective settings. A {@code -Djeiasync.*} property wins over {@link JeiAsyncConfig} so a benchmark
  * run is not overridden by a config file.
  * <p>
- * Read on every call. Forge loads the file after mixins may already have initialized this class, so
- * a value captured in a static final would stay at the spec default for the session.
+ * Read on every call. JEI builds its starter from the mod constructor, which is before NeoForge loads
+ * this client config, and {@code ConfigValue.get()} throws until then. An unloaded spec contributes
+ * its default. A value captured in a static final would stay there for the session, so later calls
+ * read the file once it is loaded.
  */
 public final class AsyncConfig {
 	private static final String THREADS_PROPERTY = "jeiasync.threads";
@@ -17,7 +19,7 @@ public final class AsyncConfig {
 	}
 
 	/**
-	 * The JEI version range this jar declares ({@code Specification-Version}). ForgeGradle writes
+	 * The JEI version range this jar declares ({@code Specification-Version}). The build writes
 	 * this add-on's own version into {@code Implementation-Version}, so that one is not used here.
 	 * Absent in a dev run, where there is no jar manifest.
 	 */
@@ -41,7 +43,7 @@ public final class AsyncConfig {
 		return resolveInt(ROW_CAPACITY_PROPERTY, JeiAsyncConfig.COMMON.recipeRowCapacity, 1);
 	}
 
-	private static int resolveInt(String key, ForgeConfigSpec.IntValue value, int minimum) {
+	private static int resolveInt(String key, ModConfigSpec.IntValue value, int minimum) {
 		String property = System.getProperty(key);
 		if (property != null) {
 			try {
@@ -52,6 +54,9 @@ public final class AsyncConfig {
 			} catch (NumberFormatException ignored) {
 				// Fall through to the config file.
 			}
+		}
+		if (!JeiAsyncConfig.SPEC.isLoaded()) {
+			return value.getDefault();
 		}
 		return value.get();
 	}

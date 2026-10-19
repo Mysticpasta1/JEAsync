@@ -1,6 +1,6 @@
 package dev.jeiasync;
 
-import net.minecraftforge.fml.loading.FMLEnvironment;
+import net.neoforged.fml.loading.FMLEnvironment;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -35,7 +35,8 @@ final class MixinSelfCheck {
 		"mezz.jei.library.recipes.collect.RecipeMap",
 		"mezz.jei.library.recipes.RecipeManagerInternal",
 		"mezz.jei.library.recipes.RecipeManager",
-		"mezz.jei.library.recipes.ExtendableRecipeCategoryHelper",
+		"mezz.jei.library.recipes.CraftingExtensionHelper",
+		"mezz.jei.library.recipes.CookingExtensionHelper",
 		"mezz.jei.library.load.registration.RecipeCategoryRegistration",
 		// Pulled in by RecipeManagerInternal, and patched indirectly via its collections.
 		"mezz.jei.library.recipes.PluginManager",
@@ -43,9 +44,8 @@ final class MixinSelfCheck {
 		"mezz.jei.library.ingredients.RegisteredIngredients",
 		"mezz.jei.library.ingredients.IngredientVisibility",
 		"mezz.jei.library.ingredients.IngredientBlacklistInternal",
-		"net.minecraftforge.eventbus.EventSubclassTransformer",
 		"net.minecraft.world.item.CreativeModeTab",
-		"mezz.jei.forge.platform.ModHelper",
+		"mezz.jei.neoforge.platform.ModHelper",
 		"mezz.jei.common.ingredients.itemStacks.TypedItemStack",
 		// Not a JEI class: this is the client event loop the guard mixin patches, so a rename
 		// there would silently disable the guard rather than fail anything else.
@@ -65,12 +65,11 @@ final class MixinSelfCheck {
 		"mezz.jei.library.ingredients.IngredientSet",
 		// Search backends; only ever constructed on the client.
 		"mezz.jei.gui.search.ElementSearch",
-		"mezz.jei.gui.search.ElementSearchLowMem",
 		"mezz.jei.gui.ingredients.IngredientFilter",
 		"mezz.jei.common.util.RegistryUtil",
 		"net.minecraft.client.Minecraft",
-		"mezz.jei.forge.startup.EventRegistration",
-		"mezz.jei.forge.startup.StartEventObserver",
+		"mezz.jei.neoforge.startup.EventRegistration",
+		"mezz.jei.neoforge.startup.StartEventObserver",
 		"mezz.jei.gui.events.GuiEventHandler"
 	);
 
@@ -121,8 +120,8 @@ final class MixinSelfCheck {
 
 	/**
 	 * A dedicated server has no {@code net.minecraft.client}, so the client-only targets cannot
-	 * resolve there. Asking Forge which side we are on rather than probing for the class matters:
-	 * touching a client class on a dedicated server trips Forge's dist cleaner and logs an ERROR
+	 * resolve there. Asking the loader which side we are on rather than probing for the class matters:
+	 * touching a client class on a dedicated server trips the dist cleaner and logs an ERROR
 	 * that looks like a real fault.
 	 */
 	private static boolean isClient() {

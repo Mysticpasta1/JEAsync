@@ -20,7 +20,7 @@ public abstract class SpawnArmorMaterialMixin {
 	@Shadow(remap = false)
 	private TagKey<Item> repairedBy;
 
-	@Inject(method = {"m_6230_", "getRepairIngredient"}, at = @At("HEAD"), cancellable = true, remap = false, require = 0)
+	@Inject(method = "getRepairIngredient", at = @At("HEAD"), cancellable = true, remap = false, require = 0)
 	private void jeiasync$emptyRepairTag(CallbackInfoReturnable<Ingredient> cir) {
 		if (this.repairedBy == null) {
 			cir.setReturnValue(Ingredient.EMPTY);

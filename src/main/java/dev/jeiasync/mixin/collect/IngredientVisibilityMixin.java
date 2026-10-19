@@ -25,7 +25,7 @@ import java.util.Set;
  * Registration and teardown synchronize on the list, and notification works from a snapshot so a
  * listener registering another from inside its callback cannot cause a concurrent modification.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 19.69.0.456.
  */
 @Mixin(value = mezz.jei.library.ingredients.IngredientVisibility.class, remap = false)
 public abstract class IngredientVisibilityMixin {

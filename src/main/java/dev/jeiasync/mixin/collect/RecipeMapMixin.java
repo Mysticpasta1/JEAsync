@@ -28,7 +28,7 @@ import java.util.stream.Stream;
  * <p>
  * Nothing here writes. Callers that fill the map do so through the locked table methods.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 19.69.0.456.
  */
 @Mixin(value = mezz.jei.library.recipes.collect.RecipeMap.class, remap = false)
 public abstract class RecipeMapMixin {

@@ -21,13 +21,13 @@ public abstract class EffectWindowEntryMixin {
 
 	@Redirect(
 		method = "buildStaticCache",
-		at = @At(value = "INVOKE", target = "Lnet/minecraft/world/food/FoodProperties;m_38749_()Ljava/util/List;"),
+		at = @At(value = "INVOKE", target = "Lnet/minecraft/world/food/FoodProperties;effects()Ljava/util/List;"),
 		remap = false,
 		require = 0
 	)
 	private static List<?> jeiasync$foodEffects(FoodProperties food) {
 		try {
-			return food.getEffects();
+			return food.effects();
 		} catch (RuntimeException failure) {
 			if (LOGGED.compareAndSet(false, true)) {
 				LogManager.getLogger().warn("JEI Async: a food effect id is not registered, so that food is left out of JEED");
