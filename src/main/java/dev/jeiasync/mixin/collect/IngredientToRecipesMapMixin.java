@@ -1,66 +1,55 @@
 package dev.jeiasync.mixin.collect;
 
-import org.jetbrains.annotations.UnmodifiableView;
+import dev.jeiasync.UnmodifiableListCache;
+import mezz.jei.library.recipes.collect.IngredientToRecipesMap;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Overwrite;
-import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Redirect;
 
-import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 /**
- * Makes {@link mezz.jei.library.recipes.collect.IngredientToRecipesMap} safe for concurrent
- * recipe registration.
+ * Reuses the unmodifiable wrapper {@link IngredientToRecipesMap#get} hands back, instead of
+ * allocating one per lookup.
  * <p>
- * The uid map is a fastutil {@code Object2ObjectOpenHashMap} held in a final field, so the whole
- * map is used under its monitor and the {@link ArrayList} values it hands back are additionally
- * guarded, since those are handed to callers who iterate them.
+ * {@code get} returns {@code Collections.unmodifiableList(recipesForIngredient)}. That wrapper is a
+ * fresh object on every call, it is immutable, and it is a pure function of the list it wraps - so
+ * two calls on the same underlying list produce two interchangeable objects. Reusing it removes the
+ * per-lookup allocation without changing what the caller sees: the wrapper is still an unmodifiable
+ * view over the same live {@code ArrayList}, so it still reflects recipes added after the lookup,
+ * exactly as a freshly-built wrapper would.
  * <p>
- * Targets upstream 15.32.0.173.
+ * {@link IngredientToRecipesMap#compact} calls {@code trimToSize} on the underlying lists, which
+ * replaces the list's internal array but keeps the list object itself, so the cached wrapper stays
+ * valid across a compaction.
+ * <p>
+ * This is a lookup-path saving, not a startup one: it does nothing for JEI's load time, which is
+ * where this add-on's headline numbers come from. The allocation it removes is short-lived and dies
+ * in the young generation, so the effect is a small reduction in scavenge pressure rather than in
+ * the live set.
+ * <p>
+ * Targets upstream 15.71.0.224.
  */
-@Mixin(value = mezz.jei.library.recipes.collect.IngredientToRecipesMap.class, remap = false)
-public abstract class IngredientToRecipesMapMixin<R> {
-	@Shadow
-	private Map<Object, ArrayList<R>> uidToRecipes;
+@Mixin(value = IngredientToRecipesMap.class, remap = false)
+public abstract class IngredientToRecipesMapMixin {
+	@Unique
+	private volatile UnmodifiableListCache jeiAsync$unmodifiableListCache;
 
-	@Overwrite
-	public void add(R recipe, Collection<Object> ingredientUids) {
-		synchronized (uidToRecipes) {
-			for (Object uid : ingredientUids) {
-				ArrayList<R> recipes = uidToRecipes.computeIfAbsent(uid, k -> new ArrayList<>());
-				synchronized (recipes) {
-					recipes.add(recipe);
-				}
-			}
+	@Redirect(
+		method = "get",
+		at = @At(
+			value = "INVOKE",
+			target = "Ljava/util/Collections;unmodifiableList(Ljava/util/List;)Ljava/util/List;"
+		)
+	)
+	private List<?> jeiAsyncCachedUnmodifiable(List<?> list) {
+		UnmodifiableListCache cache = this.jeiAsync$unmodifiableListCache;
+		if (cache == null) {
+			cache = new UnmodifiableListCache();
+			this.jeiAsync$unmodifiableListCache = cache;
 		}
-	}
-
-	@Overwrite
-	@UnmodifiableView
-	public List<R> get(Object ingredientUid) {
-		ArrayList<R> recipes;
-		synchronized (uidToRecipes) {
-			recipes = uidToRecipes.get(ingredientUid);
-		}
-		if (recipes == null) {
-			return Collections.emptyList();
-		}
-		synchronized (recipes) {
-			return Collections.unmodifiableList(recipes);
-		}
-	}
-
-	@Overwrite
-	public void compact() {
-		synchronized (uidToRecipes) {
-			uidToRecipes.values().forEach(recipes -> {
-				synchronized (recipes) {
-					recipes.trimToSize();
-				}
-			});
-		}
+		return cache.get(list);
 	}
 }

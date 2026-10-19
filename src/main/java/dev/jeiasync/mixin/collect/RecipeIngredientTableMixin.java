@@ -1,13 +1,12 @@
 package dev.jeiasync.mixin.collect;
 
+import mezz.jei.api.ingredients.IIngredientType;
 import mezz.jei.api.recipe.RecipeType;
 import org.jetbrains.annotations.UnmodifiableView;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
 
-import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -16,19 +15,23 @@ import java.util.Map;
  * registration.
  * <p>
  * The outer map is a plain {@code HashMap} in a final field, so its monitor is taken around the
- * {@code computeIfAbsent} that publishes a new {@link
- * mezz.jei.library.recipes.collect.IngredientToRecipesMap}. That makes entry creation atomic; the
- * published map guards its own contents.
+ * {@code computeIfAbsent} that publishes a new
+ * {@link mezz.jei.library.recipes.collect.IngredientToRecipesMap}. That makes entry creation atomic;
+ * the published map guards its own contents.
  * <p>
- * Targets upstream 15.32.0.173.
+ * Targets upstream 15.71.0.224.
  */
 @Mixin(value = mezz.jei.library.recipes.collect.RecipeIngredientTable.class, remap = false)
 public abstract class RecipeIngredientTableMixin {
 	@Shadow
 	private Map<RecipeType<?>, mezz.jei.library.recipes.collect.IngredientToRecipesMap<?>> map;
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the per-type row so workers can add recipe links together.
+	 */
 	@Overwrite
-	public <V> void add(V recipe, RecipeType<V> recipeType, Collection<Object> ingredientUids) {
+	public <V> void addExact(V recipe, RecipeType<V> recipeType, IIngredientType<?> ingredientType, Object uid) {
 		mezz.jei.library.recipes.collect.IngredientToRecipesMap<V> ingredientToRecipesMap;
 		synchronized (map) {
 			@SuppressWarnings("unchecked")
@@ -37,12 +40,16 @@ public abstract class RecipeIngredientTableMixin {
 					this.map.computeIfAbsent(recipeType, k -> new mezz.jei.library.recipes.collect.IngredientToRecipesMap<>());
 			ingredientToRecipesMap = existing;
 		}
-		ingredientToRecipesMap.add(recipe, ingredientUids);
+		ingredientToRecipesMap.addExact(recipe, ingredientType, uid);
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the row lookup and return a stable list to the caller.
+	 */
 	@Overwrite
 	@UnmodifiableView
-	public <V> List<V> get(RecipeType<V> recipeType, Object ingredientUid) {
+	public <V> List<V> get(RecipeType<V> recipeType, IIngredientType<?> ingredientType, Object uid) {
 		mezz.jei.library.recipes.collect.IngredientToRecipesMap<V> ingredientToRecipesMap;
 		synchronized (map) {
 			@SuppressWarnings("unchecked")
@@ -53,9 +60,14 @@ public abstract class RecipeIngredientTableMixin {
 		if (ingredientToRecipesMap == null) {
 			return List.of();
 		}
-		return ingredientToRecipesMap.get(ingredientUid);
+		// Already a snapshot: IngredientToRecipesMapMixin copies under the map's own monitor.
+		return ingredientToRecipesMap.get(ingredientType, uid);
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock compaction so it does not race a concurrent add.
+	 */
 	@Overwrite
 	public void compact() {
 		synchronized (map) {

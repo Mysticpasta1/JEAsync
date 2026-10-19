@@ -14,7 +14,7 @@ import java.util.Set;
 import java.util.function.Function;
 
 /**
- * Makes {@link mezz.jei.core.collect.MultiMap} safe for concurrent plugin registration.
+ * Makes {@link mezz.jei.common.collect.MultiMap} safe for concurrent plugin registration.
  * <p>
  * The backing {@code map} field is {@code protected final} and cannot be reassigned by a mixin,
  * so rather than swapping in a concurrent map, every method that touches it takes the map's
@@ -25,9 +25,9 @@ import java.util.function.Function;
  * created, because they are handed out through {@link #get} and iterated by callers outside the
  * map lock.
  * <p>
- * Targets upstream 15.32.0.173.
+ * Targets upstream 15.71.0.224.
  */
-@Mixin(value = mezz.jei.core.collect.MultiMap.class, remap = false)
+@Mixin(value = mezz.jei.common.collect.MultiMap.class, remap = false)
 public abstract class MultiMapMixin<K, V, T extends Collection<V>> {
 	@Shadow
 	protected Map<K, T> map;
@@ -50,6 +50,10 @@ public abstract class MultiMapMixin<K, V, T extends Collection<V>> {
 		}
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the map and the row so a worker and a reader do not share one live collection.
+	 */
 	@Overwrite
 	public Collection<V> get(K key) {
 		T collection;
@@ -68,16 +72,28 @@ public abstract class MultiMapMixin<K, V, T extends Collection<V>> {
 		return Collections.emptyList();
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the row insert so workers can register into the same map together.
+	 */
 	@Overwrite
 	public boolean put(K key, V value) {
 		return jeiAsyncCollectionFor(key).add(value);
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the row insert so a bulk put does not race another writer.
+	 */
 	@Overwrite
 	public boolean putAll(K key, Collection<V> values) {
 		return jeiAsyncCollectionFor(key).addAll(values);
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the row removal so it does not race a concurrent reader.
+	 */
 	@Overwrite
 	public boolean remove(K key, V value) {
 		T collection;
@@ -92,6 +108,10 @@ public abstract class MultiMapMixin<K, V, T extends Collection<V>> {
 		}
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the key lookup so it does not race a concurrent insert.
+	 */
 	@Overwrite
 	public boolean containsKey(K key) {
 		synchronized (map) {
@@ -99,6 +119,10 @@ public abstract class MultiMapMixin<K, V, T extends Collection<V>> {
 		}
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the row lookup so a contains check does not race a concurrent insert.
+	 */
 	@Overwrite
 	public boolean contains(K key, V value) {
 		T collection;
@@ -113,6 +137,10 @@ public abstract class MultiMapMixin<K, V, T extends Collection<V>> {
 		}
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Copy every row under its lock so the caller does not iterate a live collection.
+	 */
 	@Overwrite
 	public Collection<V> allValues() {
 		List<V> list = new ArrayList<>();
@@ -126,6 +154,10 @@ public abstract class MultiMapMixin<K, V, T extends Collection<V>> {
 		return list;
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the clear so it does not race a concurrent reader.
+	 */
 	@Overwrite
 	public void clear() {
 		synchronized (map) {
@@ -133,6 +165,10 @@ public abstract class MultiMapMixin<K, V, T extends Collection<V>> {
 		}
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock each row while copying so the immutable snapshot is consistent.
+	 */
 	@Overwrite
 	public ImmutableMultimap<K, V> toImmutable() {
 		ImmutableMultimap.Builder<K, V> builder = ImmutableMultimap.builder();
@@ -148,6 +184,10 @@ public abstract class MultiMapMixin<K, V, T extends Collection<V>> {
 
 	// Upstream returns live views of the backing map, which are unsafe to iterate once other
 	// threads can write. Nothing inside JEI calls these two, so they return snapshots instead.
+	/**
+	 * @author Mysticpasta1
+	 * @reason Return a snapshot so the caller does not iterate the live map.
+	 */
 	@Overwrite
 	public Set<Map.Entry<K, T>> entrySet() {
 		synchronized (map) {
@@ -155,6 +195,10 @@ public abstract class MultiMapMixin<K, V, T extends Collection<V>> {
 		}
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Return a snapshot so the caller does not iterate the live key set.
+	 */
 	@Overwrite
 	public Set<K> keySet() {
 		synchronized (map) {

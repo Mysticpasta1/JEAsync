@@ -25,7 +25,7 @@ import java.util.Optional;
  * rather than optimistically outside it: doing it outside would reintroduce the same race on the
  * subsequent {@code put}.
  * <p>
- * Targets upstream 15.32.0.173.
+ * Targets upstream 15.71.0.224.
  */
 @Mixin(value = mezz.jei.library.ingredients.RegisteredIngredients.class, remap = false)
 public abstract class RegisteredIngredientsMixin {
@@ -38,27 +38,35 @@ public abstract class RegisteredIngredientsMixin {
 	@Shadow
 	private Map<Class<?>, IIngredientTypeWithSubtypes<?, ?>> baseClassToType;
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the class-to-type map so a lookup does not race registration.
+	 */
 	@Overwrite
-	public <V> Optional<IIngredientType<V>> getIngredientType(Class<? extends V> ingredientClass) {
+	public <V> IIngredientType<V> getIngredientType(Class<? extends V> ingredientClass) {
 		mezz.jei.common.util.ErrorUtil.checkNotNull(ingredientClass, "ingredientClass");
 		synchronized (classToType) {
 			@SuppressWarnings("unchecked")
 			IIngredientType<V> ingredientType = (IIngredientType<V>) this.classToType.get(ingredientClass);
 			if (ingredientType != null) {
-				return Optional.of(ingredientType);
+				return ingredientType;
 			}
 			for (IIngredientType<?> type : this.orderedTypes) {
 				if (type.getIngredientClass().isAssignableFrom(ingredientClass)) {
 					@SuppressWarnings("unchecked")
 					IIngredientType<V> castType = (IIngredientType<V>) type;
 					this.classToType.put(ingredientClass, castType);
-					return Optional.of(castType);
+					return castType;
 				}
 			}
-			return Optional.empty();
+			return null;
 		}
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the base-class map so a subtype lookup does not race registration.
+	 */
 	@Overwrite
 	public <I, B> Optional<IIngredientTypeWithSubtypes<B, I>> getIngredientTypeWithSubtypesFromBase(B baseIngredient) {
 		Class<?> baseIngredientClass = baseIngredient.getClass();

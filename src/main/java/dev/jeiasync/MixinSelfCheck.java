@@ -22,24 +22,34 @@ final class MixinSelfCheck {
 	private static final Logger LOGGER = LogManager.getLogger();
 
 	private static final List<String> SERVER_SAFE_TARGETS = List.of(
-		"mezz.jei.core.collect.Table",
-		"mezz.jei.core.collect.MultiMap",
-		"mezz.jei.core.collect.SetMultiMap",
-		"mezz.jei.core.collect.ListMultiMap",
+		"mezz.jei.common.collect.Table",
+		"mezz.jei.common.collect.MultiMap",
+		"mezz.jei.common.collect.SetMultiMap",
+		"mezz.jei.common.collect.ListMultiMap",
 		"mezz.jei.library.recipes.collect.RecipeTypeData",
+		// Package-private, and named by the internal mixin config's shadow fields, so a rename
+		// there would not be caught by anything else.
+		"mezz.jei.library.recipes.collect.IngredientUidIndex",
 		"mezz.jei.library.recipes.collect.IngredientToRecipesMap",
 		"mezz.jei.library.recipes.collect.RecipeIngredientTable",
 		"mezz.jei.library.recipes.collect.RecipeMap",
 		"mezz.jei.library.recipes.RecipeManagerInternal",
 		"mezz.jei.library.recipes.RecipeManager",
+		"mezz.jei.library.recipes.ExtendableRecipeCategoryHelper",
+		"mezz.jei.library.load.registration.RecipeCategoryRegistration",
 		// Pulled in by RecipeManagerInternal, and patched indirectly via its collections.
 		"mezz.jei.library.recipes.PluginManager",
 		"mezz.jei.library.ingredients.subtypes.SubtypeInterpreters",
 		"mezz.jei.library.ingredients.RegisteredIngredients",
 		"mezz.jei.library.ingredients.IngredientVisibility",
 		"mezz.jei.library.ingredients.IngredientBlacklistInternal",
+		"net.minecraftforge.eventbus.EventSubclassTransformer",
+		"net.minecraft.world.item.CreativeModeTab",
 		"mezz.jei.forge.platform.ModHelper",
-		"mezz.jei.library.ingredients.itemStacks.TypedItemStack"
+		"mezz.jei.common.ingredients.itemStacks.TypedItemStack",
+		// Not a JEI class: this is the client event loop the guard mixin patches, so a rename
+		// there would silently disable the guard rather than fail anything else.
+		"net.minecraft.util.thread.BlockableEventLoop"
 	);
 
 	/**
@@ -56,7 +66,12 @@ final class MixinSelfCheck {
 		// Search backends; only ever constructed on the client.
 		"mezz.jei.gui.search.ElementSearch",
 		"mezz.jei.gui.search.ElementSearchLowMem",
-		"mezz.jei.gui.ingredients.IngredientFilter"
+		"mezz.jei.gui.ingredients.IngredientFilter",
+		"mezz.jei.common.util.RegistryUtil",
+		"net.minecraft.client.Minecraft",
+		"mezz.jei.forge.startup.EventRegistration",
+		"mezz.jei.forge.startup.StartEventObserver",
+		"mezz.jei.gui.events.GuiEventHandler"
 	);
 
 	private MixinSelfCheck() {

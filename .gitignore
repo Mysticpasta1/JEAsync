@@ -32,3 +32,6 @@ replay_pid*
 # Forge dev-run byproducts (run/ is ignored wholesale; named here too in case that changes)
 eula.txt
 crash-reports/
+# Benchmark harness output
+tools/benchmark-*.log
+benchmark-results.csv

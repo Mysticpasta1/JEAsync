@@ -34,7 +34,7 @@ import java.util.stream.Stream;
  * every recipe checked while browsing would take the {@code hiddenRecipes} monitor once per recipe
  * per frame.
  * <p>
- * Targets upstream 15.32.0.173.
+ * Targets upstream 15.71.0.224.
  */
 @Mixin(value = mezz.jei.library.recipes.PluginManager.class, remap = false)
 public abstract class PluginManagerMixin {
@@ -59,6 +59,10 @@ public abstract class PluginManagerMixin {
 		}
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Snapshot the plugin list so a recipe query does not race plugin registration.
+	 */
 	@Overwrite
 	public <T> Stream<T> getRecipes(RecipeTypeData<T> recipeTypeData, IFocusGroup focusGroup, boolean includeHidden) {
 		IRecipeCategory<T> recipeCategory = recipeTypeData.getRecipeCategory();
@@ -77,6 +81,10 @@ public abstract class PluginManagerMixin {
 		return recipes;
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Snapshot the plugin list so a type query does not race plugin registration.
+	 */
 	@Overwrite
 	public Stream<RecipeType<?>> getRecipeTypes(IFocusGroup focusGroup) {
 		return jeiAsyncSnapshot().stream()
@@ -84,8 +92,12 @@ public abstract class PluginManagerMixin {
 			.distinct();
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Keep a crashing recipe plugin from escaping the timed call and corrupting the shared list.
+	 */
 	@Overwrite
-	public <T> T safeCallPlugin(IRecipeManagerPlugin plugin, Supplier<T> supplier, T defaultValue) {
+	private <T> T safeCallPlugin(IRecipeManagerPlugin plugin, Supplier<T> supplier, T defaultValue) {
 		Stopwatch stopWatch = Stopwatch.createStarted();
 		try {
 			T result = supplier.get();
@@ -106,6 +118,10 @@ public abstract class PluginManagerMixin {
 		}
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock plugin-list appends so concurrent registration does not lose updates.
+	 */
 	@Overwrite
 	public <T> void addAll(List<IRecipeManagerPlugin> plugins) {
 		synchronized (this) {

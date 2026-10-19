@@ -16,7 +16,7 @@ import java.util.stream.Stream;
  * A shadowed private method is not found reliably by Mixin, so an invoker is used instead. At
  * runtime Mixin adds this interface to the target, so the cast is only there to satisfy javac.
  */
-@Mixin(RecipeManagerInternal.class)
+@Mixin(value = RecipeManagerInternal.class, remap = false)
 public interface RecipeManagerInternalInvoker {
 	@Invoker("getRecipeCategoriesUncached")
 	Stream<IRecipeCategory<?>> jeiAsyncRecipeCategoriesUncached(Collection<IRecipeCategory<?>> recipeCategories, IFocusGroup focuses, boolean includeHidden);

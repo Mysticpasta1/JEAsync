@@ -3,6 +3,7 @@ plugins {
     id 'idea'
     id 'eclipse'
     id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+    id 'org.spongepowered.mixin' version '0.7.+'
 }
 
 group = project.modGroup
@@ -12,7 +13,7 @@ def minecraftVersion = project.minecraftVersion
 def modJavaVersion = project.modJavaVersion
 
 base {
-    archivesName = "${project.modId}-${minecraftVersion}-forge"
+    archivesName = "${project.modId}-${project.modFlavor}-${minecraftVersion}-forge"
 }
 
 java {
@@ -36,7 +37,6 @@ repositories {
         url = 'https://maven.blamejared.com'
         content {
             includeGroup 'mezz.jei'
-            // JEI's own config library dependency
             includeGroup 'net.mezzdev.config'
         }
     }
@@ -47,19 +47,32 @@ repositories {
             includeGroup 'org.spongepowered'
         }
     }
+    maven {
+        name = 'CurseMaven'
+        url = 'https://cursemaven.com'
+        content {
+            includeGroup 'curse.maven'
+        }
+    }
 }
 
 dependencies {
     minecraft "net.minecraftforge:forge:${minecraftVersion}-${project.forgeVersion}"
-
     implementation fg.deobf("mezz.jei:jei-${minecraftVersion}-forge:${project.jeiVersion}")
-
+    compileOnly fg.deobf("curse.maven:jei-plus-plus-1645653:9060789")
     compileOnly 'org.spongepowered:mixin:0.8.5'
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+}
+
+mixin {
+    add sourceSets.main, 'jeiasync.refmap.json'
+    config 'jeiasync.mixins.json'
+    config 'jeiasync.compat.mixins.json'
+    config 'jeiasync.optional.mixins.json'
 }
 
 tasks.named('processResources', ProcessResources) {
     def props = [
-        githubUrl            : project.githubUrl,
         forgeLoaderVersionRange: project.forgeLoaderVersionRange,
         forgeVersionRange    : project.forgeVersionRange,
         minecraftVersionRange: project.minecraftVersionRange,
@@ -82,27 +95,48 @@ def modManifestAttributes = [
     'Implementation-Title' : project.name,
     'Implementation-Version': project.version,
     'Implementation-Vendor': project.modGroup,
-    // The mixin config has to be declared here. Forge 1.20.1 has no [[mixins]] section in
-    // mods.toml, so without this attribute the config is silently never registered and every
-    // mixin in it does nothing.
-    //
-    // It also means the mod only works when loaded from a jar. Loading it from build/classes
-    // plus build/resources, as ForgeGradle dev runs do by default, gives FML no manifest to read
-    // and the mixins silently do nothing. Dev runs therefore load the jar instead.
-    'MixinConfigs'         : 'jeiasync.mixins.json',
+    'MixinConfigs'         : 'jeiasync.mixins.json,jeiasync.compat.mixins.json,jeiasync.optional.mixins.json',
 ]
 
 tasks.named('jar', Jar) {
-    // Synthetic benchmark plugins live in main so that Forge generates annotation scan data for
-    // them, but they must never reach the shipped artifact.
     exclude 'loadtest/**'
     manifest {
         attributes(modManifestAttributes)
     }
 }
 
-// Same as the shipping jar, but it keeps the synthetic benchmark plugins so there is something
-// to measure. Never published; only used to drive the dev runs.
+tasks.register('verifyNoBenchmarkPlugins') {
+    dependsOn tasks.named('jar')
+    doLast {
+        def jarFile = tasks.named('jar').get().archiveFile.get().asFile
+        def problems = []
+        def zip = new java.util.zip.ZipFile(jarFile)
+        try {
+            zip.entries().each { entry ->
+                if (entry.name.startsWith('loadtest/')) {
+                    problems << "contains ${entry.name}"
+                } else if (entry.name.endsWith('.class')) {
+                    def bytes = zip.getInputStream(entry).withCloseable { it.bytes }
+                    if (new String(bytes, 'ISO-8859-1').contains('loadtest/')) {
+                        problems << "${entry.name} references the loadtest package"
+                    }
+                }
+            }
+        } finally {
+            zip.close()
+        }
+        if (!problems.isEmpty()) {
+            throw new GradleException(
+                "The shipping jar contains benchmark plugin material: ${problems.join('; ')}.")
+        }
+        logger.lifecycle("Shipping jar is free of benchmark plugins.")
+    }
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('verifyNoBenchmarkPlugins')
+}
+
 tasks.register('benchmarkJar', Jar) {
     archiveClassifier = 'benchmark'
     from sourceSets.main.output
@@ -112,18 +146,9 @@ tasks.register('benchmarkJar', Jar) {
     }
 }
 
-// ForgeGradle only creates the run tasks late, so they have to be matched lazily.
-// Without this the client would launch against whatever jar happens to be lying in mods.
 tasks.matching { it.name == 'runClient' }.configureEach { dependsOn 'deployBenchmarkJarClient' }
 tasks.matching { it.name == 'runServer' }.configureEach { dependsOn 'deployBenchmarkJarServer' }
 
-// Forwarded to the run JVM. Gradle's own -D flags do not reach a forked JavaExec, so these
-// have to arrive as Gradle properties: ./gradlew runServer -Pjeiasync.asyncLoading=false
-//
-// The mod is NOT declared through the runs DSL. ForgeGradle only accepts a SourceSet there, and
-// a source set carries no manifest, so FML would never read the MixinConfigs attribute and every
-// mixin would be silently unapplied. Instead the benchmark jar is dropped into each run's mods
-// folder, where FML loads it as a real jar and the manifest is honoured.
 tasks.register('deployBenchmarkJarClient', Copy) {
     dependsOn 'benchmarkJar'
     from tasks.named('benchmarkJar')
@@ -136,8 +161,7 @@ tasks.register('deployBenchmarkJarServer', Copy) {
     into layout.projectDirectory.dir('run/server/mods')
 }
 
-// ForgeGradle 6 exposes only property() on a RunConfig; there is no systemProperty().
-def forwardedProperties = ['jeiasync.asyncLoading', 'jeiasync.threads', 'loadtest.workMs', 'loadtest.ingredients', 'loadtest.ingredientBlocks']
+def forwardedProperties = ['jeiasync.threads', 'jeiasync.recipeRowCapacity', 'loadtest.workMs', 'loadtest.ingredients', 'loadtest.ingredientBlocks']
 
 minecraft {
     runs {
@@ -149,8 +173,6 @@ minecraft {
                     property key, project.getProperty(key)
                 }
             }
-            // JEI only starts once the client has joined a world, so measuring its load
-            // requires auto-connecting rather than sitting on the title screen.
             if (project.hasProperty('quickPlayServer')) {
                 args '--quickPlayMultiplayer', project.property('quickPlayServer')
             }

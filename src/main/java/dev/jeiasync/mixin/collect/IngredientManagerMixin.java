@@ -7,7 +7,7 @@ import mezz.jei.api.runtime.IIngredientManager.IIngredientListener;
 import mezz.jei.common.util.ErrorUtil;
 import mezz.jei.library.ingredients.IngredientInfo;
 import mezz.jei.library.ingredients.RegisteredIngredients;
-import mezz.jei.library.ingredients.TypedIngredient;
+import mezz.jei.common.ingredients.TypedIngredient;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.spongepowered.asm.mixin.Mixin;
@@ -19,7 +19,7 @@ import java.util.Collection;
 import java.util.List;
 
 /**
- * Lets opt-in plugins add and remove ingredients off the main thread.
+ * Lets plugins add and remove ingredients off the main thread.
  * <p>
  * Same reasoning as {@link RecipeManagerMixin}: the {@code ErrorUtil.assertMainThread()} calls here
  * sit on the runtime registration path and would make off-thread plugin registration fail on its
@@ -30,7 +30,7 @@ import java.util.List;
  * are serialised on it. Notification is copied to a list before iterating so that a listener which
  * registers another listener mid-callback cannot cause a concurrent modification.
  * <p>
- * Targets upstream 15.32.0.173.
+ * Targets upstream 15.71.0.224.
  */
 @Mixin(value = mezz.jei.library.ingredients.IngredientManager.class, remap = false)
 public abstract class IngredientManagerMixin implements mezz.jei.api.runtime.IIngredientManager {
@@ -42,73 +42,78 @@ public abstract class IngredientManagerMixin implements mezz.jei.api.runtime.IIn
 	@Shadow
 	private List<IIngredientListener> listeners;
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Drop the main-thread assertion so plugins can add ingredients off the render thread.
+	 */
 	@Overwrite
 	public <V> void addIngredientsAtRuntime(IIngredientType<V> ingredientType, Collection<V> ingredients) {
 		ErrorUtil.checkNotNull(ingredientType, "ingredientType");
 		ErrorUtil.checkNotEmpty(ingredients, "ingredients");
 
 		IngredientInfo<V> ingredientInfo = this.registeredIngredients.getIngredientInfo(ingredientType);
-
-		LOGGER.info("Ingredients are being added at runtime: {} {}", ingredients.size(), ingredientType.getIngredientClass().getName());
-
 		IIngredientHelper<V> ingredientHelper = ingredientInfo.getIngredientHelper();
-		Collection<V> validIngredients = ingredients.stream()
-			.filter(i -> {
-				if (!ingredientHelper.isValidIngredient(i)) {
-					String errorInfo = ingredientHelper.getErrorInfo(i);
-					LOGGER.error("Attempted to add an invalid Ingredient: {}", errorInfo);
-					return false;
-				}
-				if (!ingredientHelper.isIngredientOnServer(i)) {
-					String errorInfo = ingredientHelper.getErrorInfo(i);
-					LOGGER.error("Attempted to add an Ingredient that is not on the server: {}", errorInfo);
-					return false;
-				}
-				return true;
-			})
-			.toList();
 
-		ingredientInfo.addIngredients(validIngredients);
+		long started = System.nanoTime();
+		List<ITypedIngredient<V>> validTypedIngredients = new ArrayList<>(ingredients.size());
+		for (V ingredient : ingredients) {
+			if (!ingredientHelper.isIngredientOnServer(ingredient)) {
+				LOGGER.warn("Attempted to add an Ingredient that is not on the server: {}", ingredientHelper.getErrorInfo(ingredient));
+				continue;
+			}
+			ITypedIngredient<V> typedIngredient = TypedIngredient.createAndFilterInvalid(ingredientHelper, ingredientType, ingredient, false);
+			if (typedIngredient == null) {
+				LOGGER.warn("Attempted to add an invalid ingredient at runtime: {}", ingredientHelper.getErrorInfo(ingredient));
+				continue;
+			}
+			validTypedIngredients.add(typedIngredient);
+		}
+
+		ingredientInfo.addIngredients(validTypedIngredients);
 
 		List<IIngredientListener> listenersSnapshot;
 		synchronized (listeners) {
 			listenersSnapshot = List.copyOf(listeners);
 		}
 		if (!listenersSnapshot.isEmpty()) {
-			List<ITypedIngredient<V>> typedIngredients = validIngredients.stream()
-				.map(i -> TypedIngredient.createUnvalidated(ingredientType, i))
-				.toList();
-
-			listenersSnapshot.forEach(listener -> listener.onIngredientsAdded(ingredientHelper, typedIngredients));
+			listenersSnapshot.forEach(listener -> listener.onIngredientsAdded(ingredientHelper, validTypedIngredients));
 		}
+		long elapsed = (System.nanoTime() - started) / 1_000_000L;
+		LOGGER.info("Ingredients are being added at runtime: {} {} ({} ms)", ingredients.size(), ingredientType.getIngredientClass().getName(), elapsed);
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Drop the main-thread assertion so plugins can remove ingredients off the render thread.
+	 */
 	@Overwrite
 	public <V> void removeIngredientsAtRuntime(IIngredientType<V> ingredientType, Collection<V> ingredients) {
 		ErrorUtil.checkNotNull(ingredientType, "ingredientType");
 		ErrorUtil.checkNotEmpty(ingredients, "ingredients");
 
 		IngredientInfo<V> ingredientInfo = this.registeredIngredients.getIngredientInfo(ingredientType);
+		IIngredientHelper<V> ingredientHelper = ingredientInfo.getIngredientHelper();
 
-		LOGGER.info("Ingredients are being removed at runtime: {} {}", ingredients.size(), ingredientType.getIngredientClass().getName());
+		long started = System.nanoTime();
+		List<ITypedIngredient<V>> typedIngredients = TypedIngredient.createAndFilterInvalidNonnullList(this, ingredientType, ingredients, false);
 
-		ingredientInfo.removeIngredients(ingredients);
+		ingredientInfo.removeIngredients(typedIngredients);
 
 		List<IIngredientListener> listenersSnapshot;
 		synchronized (listeners) {
 			listenersSnapshot = List.copyOf(listeners);
 		}
 		if (!listenersSnapshot.isEmpty()) {
-			List<ITypedIngredient<V>> typedIngredients = ingredients.stream()
-				.flatMap(i -> TypedIngredient.createAndFilterInvalid(this, ingredientType, i, false).stream())
-				.toList();
-
-			IIngredientHelper<V> ingredientHelper = ingredientInfo.getIngredientHelper();
-
 			listenersSnapshot.forEach(listener -> listener.onIngredientsRemoved(ingredientHelper, typedIngredients));
 		}
+		long elapsed = (System.nanoTime() - started) / 1_000_000L;
+		LOGGER.info("Ingredients are being removed at runtime: {} {} ({} ms)", ingredients.size(), ingredientType.getIngredientClass().getName(), elapsed);
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Synchronize listener registration with notifications from worker threads.
+	 */
 	@Overwrite
 	public void registerIngredientListener(IIngredientListener listener) {
 		ErrorUtil.checkNotNull(listener, "listener");
@@ -117,6 +122,10 @@ public abstract class IngredientManagerMixin implements mezz.jei.api.runtime.IIn
 		}
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Synchronize listener clearing with notifications still running on a worker.
+	 */
 	@Overwrite
 	public void onRuntimeStopped() {
 		synchronized (listeners) {

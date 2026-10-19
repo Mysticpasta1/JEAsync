@@ -2,15 +2,14 @@ modLoader="javafml"
 loaderVersion="${forgeLoaderVersionRange}"
 
 license="The MIT License (MIT)"
-issueTrackerURL="${githubUrl}/issues"
 
 [[mods]]
 modId="${modId}"
 version="${modVersion}"
 displayName="${modName}"
 description='''
-Runs opt-in JEI plugin registration off the main thread to speed up startup.
-Requires upstream JEI and patches it at runtime with mixins.
+Mixin-based add-on for JEI. Not a fork: it requires upstream JEI and patches it at runtime with
+mixins, running plugin registration off the main thread to speed up startup.
 '''
 
 [[dependencies.${modId}]]

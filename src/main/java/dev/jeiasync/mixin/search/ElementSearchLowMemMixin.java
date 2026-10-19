@@ -27,7 +27,7 @@ import java.util.Set;
  * This is the low-memory search backend, selected when the client config enables it, so it needs
  * the same treatment as the default backend rather than being left as a latent failure.
  * <p>
- * Targets upstream 15.32.0.173.
+ * Targets upstream 15.71.0.224.
  */
 @Mixin(value = mezz.jei.gui.search.ElementSearchLowMem.class, remap = false)
 public abstract class ElementSearchLowMemMixin {
@@ -35,10 +35,10 @@ public abstract class ElementSearchLowMemMixin {
 	private List<IListElementInfo<?>> elementInfoList;
 
 	@Shadow
-	private mezz.jei.core.search.PrefixInfo<IListElementInfo<?>, IListElement<?>> noPrefix;
+	private mezz.jei.common.search.PrefixInfo<IListElementInfo<?>, IListElement<?>> noPrefix;
 
 	@Shadow
-	private static boolean matches(String word, mezz.jei.core.search.PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo, IListElementInfo<?> elementInfo) {
+	private static boolean matches(String word, mezz.jei.common.search.PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo, IListElementInfo<?> elementInfo) {
 		throw new AssertionError();
 	}
 
@@ -48,6 +48,10 @@ public abstract class ElementSearchLowMemMixin {
 		}
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Read the low-memory element list under a lock so a search does not race a rebuild.
+	 */
 	@Overwrite
 	public Set<IListElement<?>> getSearchResults(mezz.jei.gui.search.ElementPrefixParser.TokenInfo tokenInfo) {
 		String token = tokenInfo.token();
@@ -55,7 +59,7 @@ public abstract class ElementSearchLowMemMixin {
 			return Set.of();
 		}
 
-		mezz.jei.core.search.PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo = tokenInfo.prefixInfo();
+		mezz.jei.common.search.PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo = tokenInfo.prefixInfo();
 		List<IListElement<?>> results = new ArrayList<>();
 		for (IListElementInfo<?> elementInfo : jeiAsyncSnapshot()) {
 			if (matches(token, prefixInfo, elementInfo)) {
@@ -65,6 +69,10 @@ public abstract class ElementSearchLowMemMixin {
 		return Set.copyOf(results);
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the element-list append so workers can add ingredients together.
+	 */
 	@Overwrite
 	public <T> void add(IListElementInfo<T> info, IIngredientManager ingredientManager) {
 		synchronized (elementInfoList) {
@@ -72,6 +80,24 @@ public abstract class ElementSearchLowMemMixin {
 		}
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the element-list rebuild so it does not race a search on another thread.
+	 */
+	@Overwrite
+	public void rebuildSearchIndexes(Set<mezz.jei.gui.search.ElementSearchIndex> searchIndexes, Collection<IListElementInfo<?>> elementInfos) {
+		if (searchIndexes.contains(mezz.jei.gui.search.ElementSearchIndex.UNPREFIXED)) {
+			synchronized (elementInfoList) {
+				this.elementInfoList.clear();
+				this.elementInfoList.addAll(elementInfos);
+			}
+		}
+	}
+
+	/**
+	 * @author Mysticpasta1
+	 * @reason Snapshot the element list so the caller does not iterate it while it is being rebuilt.
+	 */
 	@Overwrite
 	public List<IListElement<?>> getAllIngredients() {
 		List<IListElement<?>> elements = new ArrayList<>();
@@ -81,6 +107,10 @@ public abstract class ElementSearchLowMemMixin {
 		return elements;
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the element scan so a lookup does not race an add.
+	 */
 	@Overwrite
 	public <T> Optional<IListElement<T>> findElement(ITypedIngredient<T> typedIngredient, IIngredientHelper<T> ingredientHelper) {
 		T ingredient = typedIngredient.getIngredient();
@@ -91,7 +121,7 @@ public abstract class ElementSearchLowMemMixin {
 		String lowercaseDisplayName = mezz.jei.gui.ingredients.DisplayNameUtil.getLowercaseDisplayNameForSearch(ingredient, ingredientHelper);
 		mezz.jei.gui.search.ElementPrefixParser.TokenInfo tokenInfo =
 			new mezz.jei.gui.search.ElementPrefixParser.TokenInfo(lowercaseDisplayName, noPrefix);
-		mezz.jei.core.search.PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo = tokenInfo.prefixInfo();
+		mezz.jei.common.search.PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo = tokenInfo.prefixInfo();
 
 		for (IListElementInfo<?> elementInfo : jeiAsyncSnapshot()) {
 			if (matches(lowercaseDisplayName, prefixInfo, elementInfo)) {

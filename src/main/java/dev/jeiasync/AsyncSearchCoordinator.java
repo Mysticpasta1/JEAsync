@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -16,55 +17,137 @@ import java.util.function.Supplier;
  * search box never blanks the ingredient list out.
  * <p>
  * Staleness is handled with a generation counter rather than by cancelling: each submission takes
- * the next generation, and a completed task only publishes its result if no newer submission has
- * happened in the meantime. Cancelling mid-sort is not possible anyway, since the running code has
- * no cancellation points.
+ * the next generation, and the caller decides whether a finished list is still worth publishing.
+ * Cancelling mid-sort is not possible anyway, since the running code has no cancellation points.
  * <p>
- * One coordinator exists per {@code IngredientFilter}. It is deliberately not thread-safe beyond the
- * atomics used here; the caller owns synchronization around {@link #isPending}.
+ * The same query is not started again while it is in flight or after it has finished, until
+ * {@link #invalidate()} marks the ingredient set stale. A newer query that arrives while a sort is
+ * running replaces that sort once, instead of stacking one sort per call.
+ * <p>
+ * List filtering has its own generation. An ingredient-set change does not drop a search-index
+ * rebuild that is still publishing.
+ * <p>
+ * One coordinator exists per {@code IngredientFilter}. {@link #submit} and {@link #invalidate} may
+ * be called from the render thread and from workers.
  */
 public final class AsyncSearchCoordinator {
+	private final Object gate = new Object();
+	/** Search-index rebuilds only. List filtering uses {@link #listGeneration}. */
 	private final AtomicLong generation = new AtomicLong();
-	private volatile String submittedFilter;
+	private final AtomicLong listGeneration = new AtomicLong();
+	private volatile String submittedFilter = "";
+	private volatile boolean stale = true;
 	private volatile CompletableFuture<?> pending;
+	private boolean running;
+	private boolean completed;
+	private boolean followUp;
+	private String followFilter;
+	private Supplier<?> followTask;
+	private BiConsumer<Long, Object> followDone;
 
 	/**
-	 * Submits {@code task} unless the same filter text is already in flight, and runs
-	 * {@code onDone} on the worker thread when it completes.
+	 * Submits {@code task} unless the same filter text is already in flight or already finished,
+	 * and runs {@code onDone} on the worker with the generation taken for this attempt.
 	 * <p>
-	 * {@code onDone} must not assume it is the current generation; check with
-	 * {@link #isCurrent(long)} inside it, or let {@link #submit} handle that via
-	 * {@link #submitIfCurrent}.
+	 * {@code onDone} is invoked even when a newer attempt has been queued. Use
+	 * {@link #isCurrent(long)} before replacing a list the player can already see.
 	 */
-	public void submit(String filterText, Supplier<?> task, Consumer<Object> onDone) {
-		if (filterText.equals(this.submittedFilter) && isPending()) {
-			return;
+	public void submit(String filterText, Supplier<?> task, BiConsumer<Long, Object> onDone) {
+		if (filterText == null) {
+			filterText = "";
 		}
-		long myGeneration = generation.incrementAndGet();
+		synchronized (gate) {
+			boolean same = filterText.equals(this.submittedFilter);
+			if (same && !this.stale && (this.running || this.completed)) {
+				return;
+			}
+			if (this.running) {
+				this.stale = true;
+				this.followUp = true;
+				this.followFilter = filterText;
+				this.followTask = task;
+				this.followDone = onDone;
+				return;
+			}
+			launch(filterText, task, onDone);
+		}
+	}
+
+	private void launch(String filterText, Supplier<?> task, BiConsumer<Long, Object> onDone) {
+		this.stale = false;
+		this.completed = false;
+		this.followUp = false;
+		this.followTask = null;
+		this.followDone = null;
 		this.submittedFilter = filterText;
+		this.running = true;
+		long myGeneration = this.listGeneration.incrementAndGet();
 
 		ExecutorService executor = AsyncPluginSupport.getExecutor();
 		CompletableFuture<Object> future = CompletableFuture.supplyAsync(() -> {
-			Object result = task.get();
-			if (myGeneration == generation.get()) {
-				onDone.accept(result);
+			Throwable error = null;
+			try {
+				Object result = task.get();
+				onDone.accept(myGeneration, result);
+				return result;
+			} catch (Throwable thrown) {
+				error = thrown;
+				if (thrown instanceof RuntimeException runtime) {
+					throw runtime;
+				}
+				if (thrown instanceof Error failure) {
+					throw failure;
+				}
+				throw new IllegalStateException(thrown);
+			} finally {
+				finish(error);
 			}
-			return result;
 		}, executor);
 
 		this.pending = future;
-		// Nothing awaits this, but an unobserved failure would otherwise be silent.
-		future.exceptionally(t -> null);
+	}
+
+	private void finish(Throwable error) {
+		Supplier<?> nextTask = null;
+		BiConsumer<Long, Object> nextDone = null;
+		String nextFilter = null;
+		synchronized (gate) {
+			this.running = false;
+			if (error != null) {
+				this.stale = true;
+				this.completed = false;
+				org.apache.logging.log4j.LogManager.getLogger(AsyncSearchCoordinator.class)
+					.warn("JEI Async: ingredient list filter failed", error);
+			} else if (!this.stale) {
+				this.completed = true;
+			}
+			if (this.followUp && this.followTask != null && this.followDone != null && this.followFilter != null) {
+				nextTask = this.followTask;
+				nextDone = this.followDone;
+				nextFilter = this.followFilter;
+				this.followUp = false;
+				this.followTask = null;
+				this.followDone = null;
+			}
+		}
+		if (nextTask != null && nextDone != null && nextFilter != null) {
+			submit(nextFilter, nextTask, nextDone);
+		}
 	}
 
 	public boolean isPending() {
+		synchronized (gate) {
+			if (this.running) {
+				return true;
+			}
+		}
 		CompletableFuture<?> current = this.pending;
 		return current != null && !current.isDone();
 	}
 
-	/** True if no submission has been made since {@code myGeneration} was taken. */
+	/** True if no list submission has been made since {@code myGeneration} was taken. */
 	public boolean isCurrent(long myGeneration) {
-		return generation.get() == myGeneration;
+		return listGeneration.get() == myGeneration;
 	}
 
 	/**
@@ -72,13 +155,24 @@ public final class AsyncSearchCoordinator {
 	 * Used when the underlying ingredient set changed rather than the query.
 	 */
 	public void invalidate() {
-		this.submittedFilter = null;
-		generation.incrementAndGet();
+		synchronized (gate) {
+			this.stale = true;
+			this.completed = false;
+			this.listGeneration.incrementAndGet();
+		}
 	}
 
 	public void reset() {
-		invalidate();
-		this.pending = null;
+		synchronized (gate) {
+			this.stale = true;
+			this.completed = false;
+			this.running = false;
+			this.followUp = false;
+			this.followTask = null;
+			this.followDone = null;
+			this.pending = null;
+			this.listGeneration.incrementAndGet();
+		}
 	}
 
 	private final Object indexLock = new Object();
@@ -119,7 +213,9 @@ public final class AsyncSearchCoordinator {
 	public List<String> describeState() {
 		return List.of(
 			"generation=" + generation.get(),
+			"listGeneration=" + listGeneration.get(),
 			"submittedFilter=" + submittedFilter,
+			"stale=" + stale,
 			"pending=" + isPending()
 		);
 	}

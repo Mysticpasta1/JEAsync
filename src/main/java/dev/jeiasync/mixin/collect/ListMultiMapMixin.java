@@ -17,10 +17,14 @@ import java.util.Map;
  * That map is declared on MultiMap, not here, so it is reached through MultiMapAccessor rather
  * than shadowed: a mixin's @Shadow only matches fields declared in its own target.
  * <p>
- * Targets upstream 15.32.0.173.
+ * Targets upstream 15.71.0.224.
  */
-@Mixin(value = mezz.jei.core.collect.ListMultiMap.class, remap = false)
+@Mixin(value = mezz.jei.common.collect.ListMultiMap.class, remap = false)
 public abstract class ListMultiMapMixin<K, V> {
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the map and copy the list so the caller does not iterate a live collection.
+	 */
 	@Overwrite
 	public List<V> get(K key) {
 		Map<K, List<V>> map = jeiAsyncMap();
@@ -38,6 +42,10 @@ public abstract class ListMultiMapMixin<K, V> {
 		return Collections.emptyList();
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the map while copying so the immutable snapshot is consistent.
+	 */
 	@Overwrite
 	public ImmutableListMultimap<K, V> toImmutable() {
 		Map<K, List<V>> map = jeiAsyncMap();

@@ -1,6 +1,6 @@
 package dev.jeiasync.mixin.collect;
 
-import mezz.jei.core.collect.MultiMap;
+import mezz.jei.common.collect.MultiMap;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Accessor;
 
@@ -19,7 +19,7 @@ import java.util.Map;
  * {@code MultiMap}, so every subclass instance satisfies it; the cast is only needed to satisfy
  * javac, since a standalone mixin class does not inherit from its target.
  */
-@Mixin(MultiMap.class)
+@Mixin(value = MultiMap.class, remap = false)
 public interface MultiMapAccessor {
 	@Accessor("map")
 	Map<?, ?> jeiAsyncBackingMap();

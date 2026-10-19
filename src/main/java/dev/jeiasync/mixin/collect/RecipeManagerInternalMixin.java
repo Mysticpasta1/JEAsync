@@ -1,15 +1,18 @@
 package dev.jeiasync.mixin.collect;
 
-import mezz.jei.api.ingredients.ITypedIngredient;
+import mezz.jei.api.gui.builder.IIngredientAcceptor;
 import mezz.jei.api.recipe.IFocusGroup;
 import mezz.jei.api.recipe.RecipeIngredientRole;
 import mezz.jei.api.recipe.RecipeType;
 import mezz.jei.api.recipe.category.IRecipeCategory;
 import mezz.jei.api.runtime.IIngredientVisibility;
+import mezz.jei.library.ingredients.RecipeIngredientSupplier;
 import mezz.jei.library.recipes.PluginManager;
 import mezz.jei.library.recipes.collect.RecipeMap;
 import mezz.jei.library.recipes.collect.RecipeTypeData;
 import mezz.jei.library.recipes.collect.RecipeTypeDataMap;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
@@ -20,6 +23,7 @@ import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 /**
@@ -37,10 +41,12 @@ import java.util.stream.Stream;
  * Every method that touches either one locks on {@code this}. Contention is negligible: these are
  * short reads and small-set updates.
  * <p>
- * Targets upstream 15.32.0.173.
+ * Targets upstream 15.71.0.224.
  */
 @Mixin(value = mezz.jei.library.recipes.RecipeManagerInternal.class, remap = false)
 public abstract class RecipeManagerInternalMixin {
+	private static final Logger LOGGER = LogManager.getLogger();
+
 	@Shadow
 	private Set<RecipeType<?>> hiddenRecipeTypes;
 
@@ -71,12 +77,12 @@ public abstract class RecipeManagerInternalMixin {
 	}
 
 	@Shadow
-	public <T> Stream<ITypedIngredient<?>> getRecipeCatalystStream(RecipeType<T> recipeType, boolean includeHidden) {
+	public <T> Stream<Consumer<IIngredientAcceptor<?>>> getRecipeCatalystGroups(RecipeType<T> recipeType, boolean includeHidden) {
 		throw new AssertionError();
 	}
 
 	@Shadow
-	private <T> boolean addRecipe(IRecipeCategory<T> recipeCategory, T recipe, Set<T> hiddenRecipes) {
+	private <T> RecipeIngredientSupplier addRecipe(IRecipeCategory<T> recipeCategory, T recipe, Set<T> hiddenRecipes) {
 		throw new AssertionError();
 	}
 
@@ -87,15 +93,22 @@ public abstract class RecipeManagerInternalMixin {
 		return ((RecipeManagerInternalInvoker) (Object) this).jeiAsyncRecipeCategoriesUncached(recipeCategories, focuses, includeHidden);
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock category-cache invalidation so workers can add recipes together.
+	 */
 	@Overwrite
 	public <T> void addRecipes(RecipeType<T> recipeType, List<T> recipes) {
+		LOGGER.debug("Adding recipes: {}", recipeType);
 		RecipeTypeData<T> recipeTypeData = recipeTypeDataMap.get(recipeType);
 		IRecipeCategory<T> recipeCategory = recipeTypeData.getRecipeCategory();
 		Set<T> hiddenRecipes = recipeTypeData.getHiddenRecipes();
 
-		List<T> addedRecipes = new ArrayList<>(recipes.size());
+List<T> addedRecipes = new ArrayList<>(recipes.size());
 		for (T recipe : recipes) {
-			if (addRecipe(recipeCategory, recipe, hiddenRecipes)) {
+			RecipeIngredientSupplier ingredientSupplier = addRecipe(recipeCategory, recipe, hiddenRecipes);
+			if (ingredientSupplier != null) {
+				recipeTypeData.addFocusLinks(recipe, ingredientSupplier.getFocusLinks());
 				addedRecipes.add(recipe);
 			}
 		}
@@ -108,6 +121,10 @@ public abstract class RecipeManagerInternalMixin {
 		}
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the hidden-type set so a visibility check does not race a hide.
+	 */
 	@Overwrite
 	public boolean isCategoryHidden(IRecipeCategory<?> recipeCategory, IFocusGroup focuses) {
 		// hide the category if it has been explicitly hidden
@@ -118,9 +135,9 @@ public abstract class RecipeManagerInternalMixin {
 			}
 		}
 
-		// hide the category if it has catalysts, but they have all been hidden
-		if (getRecipeCatalystStream(recipeType, true).findAny().isPresent() &&
-			getRecipeCatalystStream(recipeType, false).findAny().isEmpty())
+// hide the category if it has catalysts, but they have all been hidden
+		if (getRecipeCatalystGroups(recipeType, true).findAny().isPresent() &&
+			getRecipeCatalystGroups(recipeType, false).findAny().isEmpty())
 		{
 			return true;
 		}
@@ -130,6 +147,10 @@ public abstract class RecipeManagerInternalMixin {
 		return visibleRecipes.findAny().isEmpty();
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the visible-category cache so readers do not see a half-cleared list.
+	 */
 	@Overwrite
 	private Stream<IRecipeCategory<?>> getRecipeCategoriesCached(Collection<IRecipeCategory<?>> recipeCategories, IFocusGroup focuses, boolean includeHidden) {
 		if (recipeCategories.isEmpty() && focuses.isEmpty() && !includeHidden) {
@@ -149,6 +170,10 @@ public abstract class RecipeManagerInternalMixin {
 		return jeiAsyncUncachedCategories(recipeCategories, focuses, includeHidden);
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock cache invalidation so a hide does not race a reader of the visible categories.
+	 */
 	@Overwrite
 	public <T> void hideRecipes(RecipeType<T> recipeType, Collection<T> recipes) {
 		RecipeTypeData<T> recipeTypeData = recipeTypeDataMap.get(recipeType);
@@ -159,6 +184,10 @@ public abstract class RecipeManagerInternalMixin {
 		}
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock cache invalidation so an unhide does not race a reader of the visible categories.
+	 */
 	@Overwrite
 	public <T> void unhideRecipes(RecipeType<T> recipeType, Collection<T> recipes) {
 		RecipeTypeData<T> recipeTypeData = recipeTypeDataMap.get(recipeType);
@@ -169,6 +198,10 @@ public abstract class RecipeManagerInternalMixin {
 		}
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the hidden-type set so a category hide does not race a visibility check.
+	 */
 	@Overwrite
 	public void hideRecipeCategory(RecipeType<?> recipeType) {
 		synchronized (this) {
@@ -177,6 +210,10 @@ public abstract class RecipeManagerInternalMixin {
 		}
 	}
 
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the hidden-type set so a category unhide does not race a visibility check.
+	 */
 	@Overwrite
 	public void unhideRecipeCategory(RecipeType<?> recipeType) {
 		recipeTypeDataMap.validate(recipeType);
