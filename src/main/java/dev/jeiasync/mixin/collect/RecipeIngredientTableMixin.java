@@ -60,7 +60,7 @@ public abstract class RecipeIngredientTableMixin {
 		if (ingredientToRecipesMap == null) {
 			return List.of();
 		}
-		// Already a snapshot: IngredientToRecipesMapMixin copies under the map's own monitor.
+		// Snapshot of the recipes linked to this ingredient. The index packs those links into one buffer.
 		return ingredientToRecipesMap.get(ingredientType, uid);
 	}
 

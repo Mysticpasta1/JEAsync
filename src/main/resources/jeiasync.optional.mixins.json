@@ -14,10 +14,16 @@
     "CulinaryGeneratorTypeMixin",
     "ConduitFrameMixin",
     "SackColoringMixin",
-    "EffectWindowEntryMixin"
+    "EffectWindowEntryMixin",
+    "TweEnchantUtilMixin",
+    "AnvilEnchantHandlerMixin",
+    "AdventureEventsMixin",
+    "ArcaneAnvilJeiRecipeMixin",
+    "IssItemFinderMixin"
   ],
   "client": [
-    "MekanismJEIRecipeTypeMixin"
+    "MekanismJEIRecipeTypeMixin",
+    "AvaritiaJeiPluginMixin"
   ],
   "injectors": {
     "defaultRequire": 0

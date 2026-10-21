@@ -63,15 +63,17 @@ final class MixinSelfCheck {
 		// resolve in a server JVM at all.
 		"mezz.jei.library.ingredients.IngredientManager",
 		"mezz.jei.library.ingredients.IngredientSet",
-		// Search backends; only ever constructed on the client.
+		// Search backend; only ever constructed on the client.
 		"mezz.jei.gui.search.ElementSearch",
-		"mezz.jei.gui.search.ElementSearchLowMem",
 		"mezz.jei.gui.ingredients.IngredientFilter",
 		"mezz.jei.common.util.RegistryUtil",
 		"net.minecraft.client.Minecraft",
 		"mezz.jei.forge.startup.EventRegistration",
 		"mezz.jei.forge.startup.StartEventObserver",
-		"mezz.jei.gui.events.GuiEventHandler"
+		"mezz.jei.library.startup.JeiStarter",
+		"net.minecraft.world.item.crafting.RecipeManager",
+		"mezz.jei.gui.events.GuiEventHandler",
+		"mezz.jei.gui.input.GuiTextFieldFilter"
 	);
 
 	private MixinSelfCheck() {

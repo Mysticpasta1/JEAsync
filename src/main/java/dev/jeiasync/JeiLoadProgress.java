@@ -31,6 +31,12 @@ public final class JeiLoadProgress {
 	private static volatile boolean loading;
 	private static volatile boolean failed;
 	private static volatile boolean guiReady;
+	/**
+	 * True while the post-startup search build is running. Heavy indexes stay unbuilt for the
+	 * rest of {@code loading}, then this flag lets that one build proceed.
+	 */
+	private static volatile boolean buildingDeferredSearch;
+	private static volatile Runnable deferredHeavySearch;
 	private static volatile boolean listeningDuringLoad;
 	private static volatile boolean restartAfterLoad;
 	private static volatile boolean stopAfterLoad;
@@ -65,11 +71,17 @@ public final class JeiLoadProgress {
 		loading = true;
 		failed = false;
 		guiReady = false;
+		buildingDeferredSearch = false;
+		deferredHeavySearch = null;
 		listeningDuringLoad = false;
 		restartAfterLoad = false;
 		stopAfterLoad = false;
 		deferredGui = null;
 		stage = "Starting JEI";
+		ItemSubtypeCache.clear();
+		TypedIngredientIntern.clear();
+		AnvilEnchantCache.clear();
+		ArcaneRecipeTags.clear();
 		stagesStarted.set(0);
 		stageDone.set(0);
 		stageTotal.set(1);
@@ -102,6 +114,20 @@ public final class JeiLoadProgress {
 			stopAfterLoad = false;
 			restartAfterLoad = true;
 		}
+	}
+
+	/**
+	 * A recipe sync arrived while this startup is already running.
+	 * Mysticpasta1 — JEI can ignore that event, and the in-progress pass would keep the old list.
+	 * A rejoin's logout flag must not drop this. The pass keeps the sync and applies it if the player is back.
+	 */
+	public static void requestRestart() {
+		if (!loading) {
+			return;
+		}
+		// Mysticpasta1 — a rejoin sets the stop flag before the new world's packet finishes.
+		// The sync still has to be recorded so that packet can replace the list once the player is back.
+		restartAfterLoad = true;
 	}
 
 	public static boolean consumeRestart() {
@@ -145,10 +171,40 @@ public final class JeiLoadProgress {
 		}
 	}
 
-	public static void succeed() {
+	/**
+	 * True while plugin startup is still running and the heavy search indexes should not be built.
+	 * Name search is built immediately. Tooltips, tags, and the other prefixes wait until
+	 * {@link #succeed()} so their allocations do not stack on recipe registration.
+	 */
+	public static boolean isDeferringHeavySearch() {
+		return loading && !buildingDeferredSearch;
+	}
+
+	/** Replaces any earlier callback. Only the latest filter is upgraded. */
+	public static void deferHeavySearch(Runnable task) {
+		deferredHeavySearch = task;
+	}
+
+	/** Builds the deferred tooltip and tag indexes while startup is still marked loading. */
+	public static void buildDeferredSearch() {
+		runDeferredHeavySearch();
+	}
+
+	/**
+	 * Startup is finished. A recipe sync that arrives after this takes the normal restart path
+	 * instead of the in-load flag.
+	 */
+	public static void publish() {
 		loading = false;
 		failed = false;
+		TypedIngredientIntern.clear();
+		AnvilEnchantCache.clear();
 		scheduleOnClient(JeiLoadProgress::publishDeferredGui);
+	}
+
+	public static void succeed() {
+		buildDeferredSearch();
+		publish();
 	}
 
 	/** Startup was abandoned. Hides the bar and does not attach the GUI. */
@@ -157,6 +213,9 @@ public final class JeiLoadProgress {
 		failed = false;
 		guiReady = false;
 		deferredGui = null;
+		deferredHeavySearch = null;
+		TypedIngredientIntern.clear();
+		AnvilEnchantCache.clear();
 	}
 
 	public static void fail(String message) {
@@ -164,7 +223,28 @@ public final class JeiLoadProgress {
 		failed = true;
 		loading = false;
 		deferredGui = null;
+		deferredHeavySearch = null;
 		guiReady = false;
+		TypedIngredientIntern.clear();
+		AnvilEnchantCache.clear();
+	}
+
+	private static void runDeferredHeavySearch() {
+		Runnable task = deferredHeavySearch;
+		deferredHeavySearch = null;
+		if (task == null) {
+			return;
+		}
+		stage = "Building search";
+		buildingDeferredSearch = true;
+		try {
+			task.run();
+		} catch (Throwable t) {
+			org.apache.logging.log4j.LogManager.getLogger(JeiLoadProgress.class)
+				.error("JEI Async: deferred search index failed", t);
+		} finally {
+			buildingDeferredSearch = false;
+		}
 	}
 
 	public static void beginStage(String title, int plugins) {

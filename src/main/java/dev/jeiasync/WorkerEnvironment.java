@@ -132,6 +132,7 @@ public final class WorkerEnvironment {
 		try {
 			pullNeededState();
 			if (clientSnapshot != null && !isClientGameThread()) {
+				installClientFields(clientSnapshot);
 				REGISTRATION_HANDLES.set(clientSnapshot);
 				overlaid = true;
 			}
@@ -158,6 +159,7 @@ public final class WorkerEnvironment {
 		Object previousHandles = REGISTRATION_HANDLES.get();
 		Object snapshot = clientSnapshot;
 		if (snapshot != null) {
+			installClientFields(snapshot);
 			REGISTRATION_HANDLES.set(snapshot);
 		}
 		try {
@@ -196,6 +198,22 @@ public final class WorkerEnvironment {
 	 */
 	public static Object registrationHandles() {
 		return REGISTRATION_HANDLES.get();
+	}
+
+	/**
+	 * Level captured on the game thread before the worker began. Used as a fallback when a
+	 * registration handle is not installed on the current thread.
+	 */
+	public static Object clientLevelSnapshot() {
+		Object snapshot = clientSnapshot;
+		if (snapshot == null) {
+			return null;
+		}
+		try {
+			return snapshot.getClass().getField("level").get(snapshot);
+		} catch (ReflectiveOperationException ignored) {
+			return null;
+		}
 	}
 
 	private static void pullNeededState() {
@@ -293,6 +311,22 @@ public final class WorkerEnvironment {
 			return;
 		}
 		done.join();
+	}
+
+	/**
+	 * Publishes the client handles pulled on the game thread into Minecraft's public fields, so code
+	 * that reads those fields directly (rather than through a getter) sees them on a worker thread.
+	 */
+	private static void installClientFields(Object snapshot) {
+		if (FMLEnvironment.dist.isDedicatedServer() || snapshot == null) {
+			return;
+		}
+		try {
+			Class<?> puller = Class.forName("dev.jeiasync.client.ClientStatePuller");
+			puller.getMethod("installFields", Object.class).invoke(null, snapshot);
+		} catch (Throwable ignored) {
+			// Leave the live fields untouched if the client class is unavailable.
+		}
 	}
 
 	private static void restoreHandles(Object previous) {

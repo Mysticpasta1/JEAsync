@@ -10,6 +10,7 @@ import mezz.jei.api.IModPlugin;
 import mezz.jei.library.load.PluginCallerTimer;
 import mezz.jei.library.plugins.vanilla.VanillaPlugin;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraftforge.fml.loading.FMLEnvironment;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.spongepowered.asm.mixin.Mixin;
@@ -22,6 +23,7 @@ import java.util.Collections;
 import java.util.ConcurrentModificationException;
 import java.util.List;
 import java.util.Locale;
+import java.lang.reflect.Method;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.function.Consumer;
@@ -45,7 +47,10 @@ import java.util.function.Consumer;
  * this thread and stays on this thread afterwards. {@code tconstruct:jei_plugin} waits until the
  * other plugins in the phase have finished, then runs on this thread without the stuck-plugin
  * timer. Its melting-fuel scan walks every item, and its runtime callback adds and removes
- * ingredients. Vanilla's failure is still fatal on that re-run, matching upstream. A plugin that
+ * ingredients. Avaritia and its addons do the same wait: they copy the client recipe manager, and
+ * that copy has to happen after the other plugins in the phase have stopped walking it. The synced
+ * list is put back immediately before they run. Vanilla's failure is still fatal on that re-run,
+ * matching upstream. A plugin that
  * needs the render thread can implement
  * {@link dev.jeiasync.api.IAsyncCompatiblePlugin} and return false.
  * <p>
@@ -54,6 +59,7 @@ import java.util.function.Consumer;
 @Mixin(value = mezz.jei.library.load.PluginCaller.class, remap = false, priority = 0)
 public abstract class PluginCallerMixin {
 	private static final Logger JEI_ASYNC_LOGGER = LogManager.getLogger();
+	private static volatile Method jeiAsyncRestoreRecipes;
 
 	@Inject(method = "callOnPlugins", at = @At("HEAD"), cancellable = true, remap = false)
 	private static void jeiAsyncCallOnPlugins(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func, CallbackInfo ci) {
@@ -104,8 +110,8 @@ public abstract class PluginCallerMixin {
 				if (runsAfterWorkers(plugin)) {
 					afterWorkers.add(plugin);
 				} else if (AsyncPluginSupport.isAsyncCapable(plugin)) {
-					pending.add(dispatchAsync(title, plugin, func, retry));
-				} else {
+				pending.add(dispatchAsync(title, plugin, func, retry));
+			} else {
 					inline.add(plugin);
 					trailingInline.add(plugin);
 				}
@@ -252,12 +258,52 @@ public abstract class PluginCallerMixin {
 
 	/**
 	 * Tinkers' Construct iterates every item while other plugins remove ingredients, then adds
-	 * potion fluids at runtime. Both of those run after the workers for the phase have joined,
-	 * on this thread, and without the stuck-plugin timer.
+	 * potion fluids at runtime. Avaritia and its addons copy the client recipe manager. Both run
+	 * after the workers for the phase have joined, on this thread, and without the stuck-plugin
+	 * timer.
 	 */
 	private static boolean runsAfterWorkers(IModPlugin plugin) {
 		ResourceLocation uid = plugin.getPluginUid();
-		return uid != null && "tconstruct".equals(uid.getNamespace()) && "jei_plugin".equals(uid.getPath());
+		if (uid != null && "tconstruct".equals(uid.getNamespace()) && "jei_plugin".equals(uid.getPath())) {
+			return true;
+		}
+		return readsClientRecipes(plugin);
+	}
+
+	/**
+	 * Re:Avaritia's plugin uid is {@code avaritia:jei_plugin}. Addons use their own namespace or
+	 * class, and the recipes they add are datapack recipes in the same manager. Matching the name
+	 * covers both without putting those mods on the compile classpath.
+	 */
+	private static boolean readsClientRecipes(IModPlugin plugin) {
+		ResourceLocation uid = plugin.getPluginUid();
+		if (uid != null) {
+			String namespace = uid.getNamespace();
+			if (namespace != null && namespace.toLowerCase(Locale.ROOT).contains("avaritia")) {
+				return true;
+			}
+			String path = uid.getPath();
+			if (path != null && path.toLowerCase(Locale.ROOT).contains("avaritia")) {
+				return true;
+			}
+		}
+		return plugin.getClass().getName().toLowerCase(Locale.ROOT).contains("avaritia");
+	}
+
+	private static void restoreClientRecipes() {
+		if (FMLEnvironment.dist.isDedicatedServer()) {
+			return;
+		}
+		try {
+			Method method = jeiAsyncRestoreRecipes;
+			if (method == null) {
+				method = Class.forName("dev.jeiasync.ClientRecipes").getMethod("restoreIfDrifted");
+				jeiAsyncRestoreRecipes = method;
+			}
+			method.invoke(null);
+		} catch (ReflectiveOperationException failure) {
+			JEI_ASYNC_LOGGER.error("JEI Async: could not restore synced recipes", failure);
+		}
 	}
 
 	private static boolean isConcurrentModification(Throwable error) {
@@ -293,6 +339,9 @@ public abstract class PluginCallerMixin {
 			ResourceLocation pluginUid = plugin.getPluginUid();
 			if (timer != null) {
 				timer.begin(title, pluginUid);
+			}
+			if (readsClientRecipes(plugin)) {
+				restoreClientRecipes();
 			}
 			func.accept(plugin);
 			if (timer != null) {

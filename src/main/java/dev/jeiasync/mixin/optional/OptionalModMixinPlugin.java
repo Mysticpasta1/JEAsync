@@ -3,6 +3,8 @@ package dev.jeiasync.mixin.optional;
 import java.util.List;
 import java.util.Set;
 
+import dev.jeiasync.compat.AnvilEnchantFormat;
+import dev.jeiasync.compat.ArcaneRegistration;
 import dev.jeiasync.compat.JewelryCategoryBridge;
 import dev.jeiasync.compat.MekanismRecipeTypeLock;
 import org.objectweb.asm.tree.ClassNode;
@@ -43,6 +45,8 @@ public final class OptionalModMixinPlugin implements IMixinConfigPlugin {
 			MekanismRecipeTypeLock.apply(targetClass);
 		}
 		JewelryCategoryBridge.prepare(targetClass);
+		ArcaneRegistration.prepare(targetClass);
+		AnvilEnchantFormat.prepare(targetClass);
 	}
 
 	@Override

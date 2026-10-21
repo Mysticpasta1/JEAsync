@@ -123,7 +123,9 @@ public final class IngredientUidIndexCalls {
 
 	private static final class LockedArrayList extends ArrayList<Object> {
 		private LockedArrayList(Collection<?> source) {
-			super(Math.max(source.size(), 8));
+			// One slot until the row grows. Most ingredients appear in a handful of recipes, and a
+			// floor of 8 keeps an empty array alive for every one of them until compact() runs.
+			super(Math.max(source.size(), 1));
 			for (Object element : source) {
 				super.add(element);
 			}

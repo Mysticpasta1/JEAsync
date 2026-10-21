@@ -1,55 +1,88 @@
 package dev.jeiasync.mixin.collect;
 
-import dev.jeiasync.UnmodifiableListCache;
+import dev.jeiasync.CompactRecipeIndex;
+import dev.jeiasync.MixinApplied;
+import mezz.jei.api.ingredients.IIngredientType;
 import mezz.jei.library.recipes.collect.IngredientToRecipesMap;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Unique;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Redirect;
 
-import java.util.Collections;
 import java.util.List;
 
 /**
- * Reuses the unmodifiable wrapper {@link IngredientToRecipesMap#get} hands back, instead of
- * allocating one per lookup.
+ * Stores ingredient-to-recipe links in {@link CompactRecipeIndex} instead of one {@code ArrayList}
+ * of recipe objects per ingredient.
  * <p>
- * {@code get} returns {@code Collections.unmodifiableList(recipesForIngredient)}. That wrapper is a
- * fresh object on every call, it is immutable, and it is a pure function of the list it wraps - so
- * two calls on the same underlying list produce two interchangeable objects. Reusing it removes the
- * per-lookup allocation without changing what the caller sees: the wrapper is still an unmodifiable
- * view over the same live {@code ArrayList}, so it still reflects recipes added after the lookup,
- * exactly as a freshly-built wrapper would.
+ * Upstream keeps every link as an object reference, and each ingredient owns its own list object
+ * with spare slots. Registration of a large pack is dominated by those lists. The replacement
+ * stores local recipe ids on the ingredient map. Compaction only drops spare slots. It does not
+ * copy the ids into a second buffer.
  * <p>
- * {@link IngredientToRecipesMap#compact} calls {@code trimToSize} on the underlying lists, which
- * replaces the list's internal array but keeps the list object itself, so the cached wrapper stays
- * valid across a compaction.
+ * {@link #get} returns a snapshot. The public lookup copies whatever this returns, so a live view
+ * was copied immediately anyway.
  * <p>
- * This is a lookup-path saving, not a startup one: it does nothing for JEI's load time, which is
- * where this add-on's headline numbers come from. The allocation it removes is short-lived and dies
- * in the young generation, so the effect is a small reduction in scavenge pressure rather than in
- * the live set.
- * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 15.74.0.225.
  */
 @Mixin(value = IngredientToRecipesMap.class, remap = false)
-public abstract class IngredientToRecipesMapMixin {
+public abstract class IngredientToRecipesMapMixin<R> {
 	@Unique
-	private volatile UnmodifiableListCache jeiAsync$unmodifiableListCache;
+	private static volatile boolean jeiasync$marked;
 
-	@Redirect(
-		method = "get",
-		at = @At(
-			value = "INVOKE",
-			target = "Ljava/util/Collections;unmodifiableList(Ljava/util/List;)Ljava/util/List;"
-		)
-	)
-	private List<?> jeiAsyncCachedUnmodifiable(List<?> list) {
-		UnmodifiableListCache cache = this.jeiAsync$unmodifiableListCache;
-		if (cache == null) {
-			cache = new UnmodifiableListCache();
-			this.jeiAsync$unmodifiableListCache = cache;
+	@Unique
+	private volatile CompactRecipeIndex<R> jeiasync$index;
+
+	@Unique
+	private CompactRecipeIndex<R> jeiasync$index() {
+		CompactRecipeIndex<R> index = this.jeiasync$index;
+		if (index != null) {
+			return index;
 		}
-		return cache.get(list);
+		synchronized (this) {
+			index = this.jeiasync$index;
+			if (index == null) {
+				index = new CompactRecipeIndex<>();
+				this.jeiasync$index = index;
+			}
+			return index;
+		}
+	}
+
+	/**
+	 * @author Mysticpasta1
+	 * @reason Record the recipe id instead of keeping another object reference per ingredient.
+	 */
+	@Overwrite
+	public void addExact(R recipe, IIngredientType<?> ingredientType, Object uid) {
+		if (!jeiasync$marked) {
+			jeiasync$marked = true;
+			MixinApplied.mark("collect.IngredientToRecipesMapMixin");
+		}
+		jeiasync$index().add(ingredientType, uid, recipe);
+	}
+
+	/**
+	 * @author Mysticpasta1
+	 * @reason Read the recipe ids back out of the ingredient map.
+	 */
+	@Overwrite
+	public List<R> get(IIngredientType<?> ingredientType, Object uid) {
+		CompactRecipeIndex<R> index = this.jeiasync$index;
+		if (index == null) {
+			return List.of();
+		}
+		return index.get(ingredientType, uid);
+	}
+
+	/**
+	 * @author Mysticpasta1
+	 * @reason Drop spare slots in the ingredient maps once registration has finished adding.
+	 */
+	@Overwrite
+	public void compact() {
+		CompactRecipeIndex<R> index = this.jeiasync$index;
+		if (index != null) {
+			index.compact();
+		}
 	}
 }

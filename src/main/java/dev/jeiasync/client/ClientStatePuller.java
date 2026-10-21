@@ -38,6 +38,28 @@ public final class ClientStatePuller {
 		);
 	}
 
+	/**
+	 * Publishes the handles pulled on the game thread into Minecraft's public fields, so code that
+	 * reads those fields directly sees them on a worker thread.
+	 */
+	public static void installFields(Object handles) {
+		if (!(handles instanceof ClientHandles clientHandles)) {
+			return;
+		}
+		handles = clientHandles;
+		Minecraft minecraft = Minecraft.getInstance();
+		if (minecraft == null) {
+			return;
+		}
+		MinecraftClientAccessor accessor = (MinecraftClientAccessor) (Object) minecraft;
+		if (clientHandles.level != null) {
+			accessor.jeiAsyncSetLevel(clientHandles.level);
+		}
+		if (clientHandles.player != null) {
+			accessor.jeiAsyncSetPlayer(clientHandles.player);
+		}
+	}
+
 	public static boolean isClientGameThread() {
 		Minecraft minecraft = Minecraft.getInstance();
 		if (minecraft == null) {

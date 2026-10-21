@@ -1,13 +1,22 @@
 package dev.jeiasync.mixin.startup;
 
+import dev.jeiasync.ClientRecipeViews;
 import dev.jeiasync.JeiLoadProgress;
 import dev.jeiasync.MixinApplied;
 import dev.jeiasync.WorkerEnvironment;
+import dev.jeiasync.client.JeiLoadOverlay;
 import mezz.jei.common.Internal;
+import mezz.jei.common.network.IConnectionToServer;
+import mezz.jei.forge.events.PermanentEventSubscriptions;
 import mezz.jei.forge.startup.StartEventObserver;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.world.item.crafting.Recipe;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Coerce;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -16,6 +25,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.Collection;
+import java.util.ConcurrentModificationException;
 
 /**
  * Runs JEI's startup off the render thread.
@@ -23,42 +34,283 @@ import java.lang.reflect.Method;
  * {@code transitionState} is the single place startup and shutdown go through, including the
  * container-screen path that force-starts JEI when a screen opens early. The render thread marks
  * JEI started and returns. The worker runs {@code startRunnable}. A second start while that worker
- * is busy is ignored. Waiting for it on the render thread deadlocks a plugin that queued client
- * work, which is how an early inventory open used to hang or crash.
+ * is busy is recorded and applied when the current pass finishes. Waiting for it on the render
+ * thread deadlocks a plugin that queued client work, which is how an early inventory open used to
+ * hang or crash.
  * <p>
- * Login starts JEI without waiting for {@code RecipesUpdatedEvent}. On a large pack that event
- * can arrive long after the player can open a screen, and a failed recipe packet never sends it.
- * JEI then stays idle until the inventory opens and force-starts from that screen. A recipe sync
- * that arrives afterwards still restarts JEI, which is the path that picks up the server recipes.
+ * Startup used to wait for {@code RecipesUpdatedEvent} whenever the server might send recipes.
+ * A connection change clears the login flag, and the recipe handler then records the sync and
+ * returns without starting. JEI stayed listening until a container screen force-started it.
+ * The client tick now takes that same screen path once the local player is in a level, holding
+ * the start until JEI has a recipe record for this connection so the plugins read the server
+ * sync instead of a vanilla fallback; the hold expires so a missing packet cannot leave JEI dark.
+ * A filled manager is still kept, so Avaritia does not lose recipes that have already arrived.
+ * A sync that lands while startup is running is applied when the current pass finishes.
  * <p>
- * A disconnect during startup is applied after the worker finishes. A restart requested during
- * startup (synced recipes arriving) stops and starts once more on that same worker.
+ * A disconnect during startup is applied after the worker finishes, unless the player is already
+ * back in a world. A rejoin fires logout while startup is still running, and cancelling that
+ * transition leaves the state at {@code JEI_STARTED}, so the new login cannot start JEI.
+ * Tearing the finished runtime down then made the client tick begin another full load.
+ * A recipe sync that arrives during startup, including while the deferred search indexes are
+ * built, stops and starts again on that same worker. A few syncs in one load are applied.
+ * Further ones are logged and skipped so a plugin that posts recipe events cannot restart forever.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 15.74.0.225.
  */
 @Mixin(value = StartEventObserver.class, remap = false)
 public abstract class StartEventObserverMixin {
 	private static final Logger LOGGER = LogManager.getLogger();
-	private static boolean notedEarlyStart;
+	private static final int MAX_RESTARTS = 4;
+	/**
+	 * How long the tick-start may wait for the server's recipe sync before starting on the
+	 * client fallback. Vanilla sends the recipe packet within a few ticks of the join, so this
+	 * only expires when the packet was dropped entirely and there is nothing to wait for.
+	 */
+	private static final long SYNC_WAIT_MS = 20_000;
+
+	@Shadow
+	private IConnectionToServer serverConnection;
+
+	@Shadow
+	private boolean observedLogin;
+
+	@Shadow
+	private boolean observedRecipeSync;
+
+	@Shadow
+	private void startIfReady() {
+		throw new AssertionError();
+	}
 
 	/**
-	 * {@code startIfReady} returns while it is still waiting on the recipe sync. Skipping that
-	 * wait starts JEI from the login event. The recipe event's restart path is unchanged.
+	 * The player join that already took the screen's force-start path. Logged-out clients clear this
+	 * so the next world can start again.
 	 */
-	@Redirect(
-		method = "startIfReady",
-		at = @At(
-			value = "INVOKE",
-			target = "Lmezz/jei/forge/startup/StartEventObserver;shouldWaitForRecipes()Z"
-		),
-		remap = false
-	)
-	private boolean jeiasync$startBeforeRecipeSync(StartEventObserver observer) {
-		if (!notedEarlyStart) {
-			notedEarlyStart = true;
-			LOGGER.info("JEI Async: starting at login. A later server recipe sync restarts JEI.");
+	@Unique
+	private boolean jeiasync$forced;
+
+	@Unique
+	private boolean jeiasync$loadingAtRecipeHead;
+
+	@Unique
+	private static Field jeiasync$stateField;
+
+	@Unique
+	private static long jeiasync$syncWaitStart;
+
+	@Unique
+	private static Method jeiasync$transitionMethod;
+
+	@Unique
+	private static Class<?> jeiasync$stateType;
+
+	// Reverted: let JEI wait for RecipesUpdatedEvent when the server may send recipes.
+
+	/**
+	 * @author Mysticpasta1
+	 * @reason JEI's own tick registration can miss the join. This mod's client tick is the one that runs.
+	 */
+	@Inject(method = "register", at = @At("TAIL"), remap = false)
+	private void jeiasync$watchForLoadedRecipes(PermanentEventSubscriptions subscriptions, CallbackInfo ci) {
+		JeiLoadOverlay.armStartup(this::jeiasync$startFromClientTick);
+	}
+
+	/**
+	 * @author Mysticpasta1
+	 * @reason {@code startIfReady} returns immediately when login was never observed.
+	 */
+	@Inject(method = "startIfReady", at = @At("HEAD"), remap = false)
+	private void jeiasync$acceptLoadedRecipes(CallbackInfo ci) {
+		jeiasync$markLoadedWorldReady();
+	}
+
+	/**
+	 * @author Mysticpasta1
+	 * @reason Remember whether this event arrived in the middle of a startup that was already running.
+	 */
+	@Inject(method = "onRecipesUpdatedEvent", at = @At("HEAD"), remap = false)
+	private void jeiasync$noteLoadOnRecipe(CallbackInfo ci) {
+		this.jeiasync$loadingAtRecipeHead = JeiLoadProgress.isLoading();
+	}
+
+	/**
+	 * @author Mysticpasta1
+	 * @reason An ignored recipe event never reaches {@code startIfReady}, so the inventory screen was the only start.
+	 */
+	@Inject(method = "onRecipesUpdatedEvent", at = @At("RETURN"), remap = false)
+	private void jeiasync$startAfterIgnoredSync(CallbackInfo ci) {
+		Minecraft minecraft = Minecraft.getInstance();
+		ClientLevel level = minecraft.level;
+		if (minecraft.player == null || level == null) {
+			return;
 		}
-		return false;
+		boolean stale = level.getRecipeManager() instanceof ClientRecipeViews views && views.jeiasync$servedStale();
+		if (!jeiasync$managerHasRecipes()) {
+			return;
+		}
+		boolean startedDuringEvent = !this.jeiasync$loadingAtRecipeHead && JeiLoadProgress.isLoading();
+		if (startedDuringEvent) {
+			return;
+		}
+		if (JeiLoadProgress.isLoading()) {
+			if (stale) {
+				LOGGER.info("JEI Async: server recipes replaced a list plugins already read, restarting registration");
+				JeiLoadProgress.requestRestart();
+			} else {
+				LOGGER.info("JEI Async: server recipes are in the client manager before plugins read them");
+			}
+			return;
+		}
+		if (jeiasync$isStarted()) {
+			// Startup already published, and this event did not restart it. The manager now has the new list.
+			jeiasync$forceStart("recipe sync");
+			return;
+		}
+		jeiasync$markLoadedWorldReady();
+		jeiasync$forceStart("recipe sync");
+	}
+
+	/**
+	 * @author Mysticpasta1
+	 * @reason Take the container-screen start path as soon as the player is in a level.
+	 */
+	@Unique
+	private void jeiasync$startFromClientTick() {
+		Minecraft minecraft = Minecraft.getInstance();
+		if (minecraft.player == null || minecraft.level == null) {
+			this.jeiasync$forced = false;
+			jeiasync$resetSyncWait();
+			return;
+		}
+		if (this.jeiasync$forced || JeiLoadProgress.isLoading()) {
+			return;
+		}
+		if (jeiasync$isStarted()) {
+			this.jeiasync$forced = true;
+			return;
+		}
+		if (jeiasync$waitForSync()) {
+			return;
+		}
+		jeiasync$markLoadedWorldReady();
+		jeiasync$forceStart("client tick");
+	}
+
+	/**
+	 * @author Mysticpasta1
+	 * @reason Holding the tick-start until JEI has a recipe record for this connection means the
+	 * plugins read the server sync from the first pass, and neither the fallback nor JEI's
+	 * "server does not provide recipes" warning is ever produced. The wait expires for servers
+	 * that never deliver the packet, so JEI still starts rather than staying dark.
+	 */
+	@Unique
+	private static boolean jeiasync$waitForSync() {
+		if (Internal.hasClientRecipes()) {
+			jeiasync$resetSyncWait();
+			return false;
+		}
+		long now = System.currentTimeMillis();
+		if (jeiasync$syncWaitStart == 0) {
+			jeiasync$syncWaitStart = now;
+			LOGGER.info("JEI Async: holding JEI startup until the server recipe sync arrives");
+			return true;
+		}
+		boolean expired = now - jeiasync$syncWaitStart > SYNC_WAIT_MS;
+		if (expired) {
+			LOGGER.warn("JEI Async: no server recipe sync within {} ms, starting JEI with the client fallback", SYNC_WAIT_MS);
+			jeiasync$resetSyncWait();
+			return false;
+		}
+		return true;
+	}
+
+	@Unique
+	private static void jeiasync$resetSyncWait() {
+		jeiasync$syncWaitStart = 0;
+	}
+
+	/**
+	 * @author Mysticpasta1
+	 * @reason Login stays false after a missed connection event. A filled manager is enough for {@code startIfReady}.
+	 */
+	@Unique
+	private boolean jeiasync$markLoadedWorldReady() {
+		Minecraft minecraft = Minecraft.getInstance();
+		if (minecraft.player == null || minecraft.level == null || !jeiasync$managerHasRecipes()) {
+			return false;
+		}
+		this.observedLogin = true;
+		this.observedRecipeSync = true;
+		return true;
+	}
+
+	/**
+	 * @author Mysticpasta1
+	 * @reason Call the same two transitions the inventory screen uses, which do not check the login flag.
+	 */
+	@Unique
+	private void jeiasync$forceStart(String source) {
+		this.jeiasync$forced = true;
+		try {
+			LOGGER.info("JEI Async: starting from the {} without a container screen", source);
+			jeiasync$invokeTransition("LISTENING");
+			jeiasync$invokeTransition("JEI_STARTED");
+			if (!JeiLoadProgress.isLoading() && !jeiasync$isStarted()) {
+				this.jeiasync$forced = false;
+			}
+		} catch (ReflectiveOperationException e) {
+			this.jeiasync$forced = false;
+			LOGGER.error("JEI Async: could not start from the {}", source, e);
+		}
+	}
+
+	@Unique
+	private boolean jeiasync$isStarted() {
+		try {
+			return "JEI_STARTED".equals(String.valueOf(jeiasync$stateField().get(this)));
+		} catch (ReflectiveOperationException e) {
+			return false;
+		}
+	}
+
+	@Unique
+	private static Field jeiasync$stateField() throws NoSuchFieldException {
+		Field field = jeiasync$stateField;
+		if (field == null) {
+			field = StartEventObserver.class.getDeclaredField("state");
+			field.setAccessible(true);
+			jeiasync$stateField = field;
+		}
+		return field;
+	}
+
+	@Unique
+	@SuppressWarnings({"unchecked", "rawtypes"})
+	private void jeiasync$invokeTransition(String name) throws ReflectiveOperationException {
+		Class<?> type = jeiasync$stateType;
+		Method method = jeiasync$transitionMethod;
+		if (method == null || type == null) {
+			type = Class.forName("mezz.jei.forge.startup.StartEventObserver$State");
+			method = StartEventObserver.class.getDeclaredMethod("transitionState", type);
+			method.setAccessible(true);
+			jeiasync$stateType = type;
+			jeiasync$transitionMethod = method;
+		}
+		method.invoke(this, Enum.valueOf((Class) type, name));
+	}
+
+	private static boolean jeiasync$managerHasRecipes() {
+		Minecraft minecraft = Minecraft.getInstance();
+		ClientLevel level = minecraft.level;
+		if (level == null) {
+			return false;
+		}
+		try {
+			Collection<Recipe<?>> recipes = level.getRecipeManager().getRecipes();
+			return recipes != null && !recipes.isEmpty();
+		} catch (ConcurrentModificationException ignored) {
+			return true;
+		}
 	}
 
 	@Inject(method = "transitionState", at = @At("HEAD"), cancellable = true, remap = false)
@@ -101,33 +353,67 @@ public abstract class StartEventObserverMixin {
 
 	private void runStart() {
 		try {
-			invokeStart();
 			int restarts = 0;
-			while (JeiLoadProgress.consumeRestart() && restarts++ < 2) {
-				invokeStop();
-				invokeStart();
-			}
-			if (JeiLoadProgress.consumeStop()) {
-				JeiLoadProgress.dropDeferredGui();
-				assignListening();
-				if (Internal.getOptionalJeiRuntime().isPresent()) {
-					invokeStop();
+			invokeStart();
+			while (true) {
+				if (abandonIfStopped()) {
+					return;
 				}
-				JeiLoadProgress.finish();
+				if (restarts < MAX_RESTARTS && JeiLoadProgress.consumeRestart()) {
+					restarts++;
+					LOGGER.info("JEI Async: recipe sync arrived during startup, restarting ({}/{})", restarts, MAX_RESTARTS);
+					invokeStop();
+					invokeStart();
+					continue;
+				}
+				if (!Internal.getOptionalJeiRuntime().isPresent()) {
+					LOGGER.error("JEI Async: startup finished without a runtime");
+					JeiLoadProgress.dropDeferredGui();
+					JeiLoadProgress.fail("JEI failed to load");
+					return;
+				}
+				JeiLoadProgress.buildDeferredSearch();
+				if (abandonIfStopped()) {
+					return;
+				}
+				boolean restart = JeiLoadProgress.consumeRestart();
+				if (restart && restarts < MAX_RESTARTS) {
+					restarts++;
+					LOGGER.info("JEI Async: recipe sync arrived while search indexes were building, restarting ({}/{})", restarts, MAX_RESTARTS);
+					invokeStop();
+					invokeStart();
+					continue;
+				}
+				if (restart) {
+					LOGGER.warn("JEI Async: a recipe sync arrived after {} restarts and was not applied", MAX_RESTARTS);
+				}
+				JeiLoadProgress.publish();
 				return;
-			}
-			if (Internal.getOptionalJeiRuntime().isPresent()) {
-				JeiLoadProgress.succeed();
-			} else {
-				LOGGER.error("JEI Async: startup finished without a runtime");
-				JeiLoadProgress.dropDeferredGui();
-				JeiLoadProgress.fail("JEI failed to load");
 			}
 		} catch (Throwable t) {
 			LOGGER.error("JEI Async: startup failed", t);
 			JeiLoadProgress.dropDeferredGui();
 			JeiLoadProgress.fail("JEI failed to load");
 		}
+	}
+
+	private boolean abandonIfStopped() throws ReflectiveOperationException {
+		if (!JeiLoadProgress.consumeStop()) {
+			return false;
+		}
+		Minecraft minecraft = Minecraft.getInstance();
+		// Mysticpasta1 — logout during the load is a rejoin when the player is in a world again at the end.
+		if (minecraft.player != null && minecraft.level != null) {
+			LOGGER.info("JEI Async: the player rejoined during startup, so this pass is kept");
+			return false;
+		}
+		JeiLoadProgress.dropDeferredGui();
+		assignListening();
+		if (Internal.getOptionalJeiRuntime().isPresent()) {
+			invokeStop();
+		}
+		JeiLoadProgress.finish();
+		return true;
 	}
 
 	private void assignState(Object newState) throws ReflectiveOperationException {
@@ -149,6 +435,10 @@ public abstract class StartEventObserverMixin {
 	}
 
 	private void invokeStart() throws ReflectiveOperationException {
+		Minecraft minecraft = Minecraft.getInstance();
+		if (minecraft.level != null && minecraft.level.getRecipeManager() instanceof ClientRecipeViews views) {
+			views.jeiasync$clearServed();
+		}
 		Field field = StartEventObserver.class.getDeclaredField("startRunnable");
 		field.setAccessible(true);
 		((Runnable) field.get(this)).run();

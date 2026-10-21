@@ -1,5 +1,7 @@
 package dev.jeiasync.mixin.search;
 
+import dev.jeiasync.DeferredSearchStorage;
+import dev.jeiasync.JeiLoadProgress;
 import dev.jeiasync.RuntimeIngredientUpdates;
 import mezz.jei.api.ingredients.IIngredientHelper;
 import mezz.jei.api.ingredients.ITypedIngredient;
@@ -19,10 +21,13 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -79,6 +84,68 @@ public abstract class ElementSearchMixin {
 	@Shadow
 	private void updateCombinedSearchables() {
 		throw new AssertionError();
+	}
+
+	@Shadow
+	private void updateExistingIndexes(Collection<IListElementInfo<?>> infos, Set<ElementSearchIndex> indexesToRebuild) {
+		throw new AssertionError();
+	}
+
+	// Mixin does not apply a field initialiser, so this is created on first use.
+	private static volatile ThreadLocal<Boolean> jeiAsyncEmptyInfos;
+
+	private static ThreadLocal<Boolean> jeiAsyncEmptyInfos() {
+		ThreadLocal<Boolean> local = jeiAsyncEmptyInfos;
+		if (local != null) {
+			return local;
+		}
+		synchronized (ElementSearchMixin.class) {
+			local = jeiAsyncEmptyInfos;
+			if (local == null) {
+				local = ThreadLocal.withInitial(() -> Boolean.FALSE);
+				jeiAsyncEmptyInfos = local;
+			}
+			return local;
+		}
+	}
+
+	/**
+	 * Name search is built with the ingredient list. The other prefixes, tooltips especially,
+	 * allocate their strings here, and that used to happen in the middle of startup while recipes
+	 * and the GUI were still being built. A placeholder keeps the map entry without opening a
+	 * Lucene index. The real strings are filled in after startup returns.
+	 */
+	@Inject(method = "rebuildSearchIndex", at = @At("HEAD"), remap = false)
+	private void jeiasync$markHeavyIndex(ElementSearchIndex searchIndex, Collection<IListElementInfo<?>> infos, CallbackInfo ci) {
+		jeiAsyncEmptyInfos().set(
+			JeiLoadProgress.isDeferringHeavySearch() && searchIndex != ElementSearchIndex.NAMES_AND_ALIASES
+		);
+	}
+
+	@Inject(method = "rebuildSearchIndex", at = @At("RETURN"), remap = false)
+	private void jeiasync$clearHeavyIndex(ElementSearchIndex searchIndex, Collection<IListElementInfo<?>> infos, CallbackInfo ci) {
+		ThreadLocal<Boolean> local = jeiAsyncEmptyInfos;
+		if (local != null) {
+			local.set(Boolean.FALSE);
+		}
+	}
+
+	@Redirect(
+		method = "rebuildSearchIndex",
+		at = @At(
+			value = "INVOKE",
+			target = "Lmezz/jei/gui/search/ElementSearch;createSearchable(Lmezz/jei/common/search/PrefixInfo;Ljava/util/Collection;)Lmezz/jei/common/search/PrefixedSearchable;"
+		)
+	)
+	private PrefixedSearchable<IListElementInfo<?>, IListElement<?>> jeiasync$deferHeavyStrings(
+		PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo,
+		Collection<IListElementInfo<?>> infos
+	) {
+		ThreadLocal<Boolean> local = jeiAsyncEmptyInfos;
+		if (local != null && Boolean.TRUE.equals(local.get())) {
+			return new PrefixedSearchable<>(DeferredSearchStorage.get(), prefixInfo);
+		}
+		return createSearchable(prefixInfo, infos);
 	}
 
 	/**
@@ -139,19 +206,19 @@ public abstract class ElementSearchMixin {
 		PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo,
 		Collection<IListElementInfo<?>> infos
 	) {
+		SearchMode searchMode = prefixInfo.getMode();
+		if (searchMode == SearchMode.DISABLED) {
+			return new PrefixedSearchable<>(DeferredSearchStorage.get(), prefixInfo);
+		}
 		long started = System.nanoTime();
 		ISearchStorageBuilder<IListElement<?>> storageBuilder = prefixInfo.createStorageBuilder();
-
-		SearchMode searchMode = prefixInfo.getMode();
-		if (searchMode != SearchMode.DISABLED) {
-			for (IListElementInfo<?> info : infos) {
-				Collection<String> strings = prefixInfo.getStrings(info);
-				IListElement<?> element = info.getElement();
-				for (String string : strings) {
-					String trimmed = string.trim();
-					if (!trimmed.isEmpty()) {
-						storageBuilder.put(trimmed, element);
-					}
+		for (IListElementInfo<?> info : infos) {
+			Collection<String> strings = prefixInfo.getStrings(info);
+			IListElement<?> element = info.getElement();
+			for (String string : strings) {
+				String trimmed = string.trim();
+				if (!trimmed.isEmpty()) {
+					storageBuilder.put(trimmed, element);
 				}
 			}
 		}
@@ -174,10 +241,43 @@ public abstract class ElementSearchMixin {
 	public void rebuildSearchIndexes(Set<ElementSearchIndex> searchIndexes, Collection<IListElementInfo<?>> infos) {
 		synchronized (allElements) {
 			synchronized (RuntimeIngredientUpdates.SEARCH_LOCK) {
-				for (ElementSearchIndex searchIndex : searchIndexes) {
-					rebuildSearchIndex(searchIndex, infos);
+				try {
+					for (ElementSearchIndex searchIndex : searchIndexes) {
+						rebuildSearchIndex(searchIndex, infos);
+					}
+				} finally {
+					updateCombinedSearchables();
 				}
-				updateCombinedSearchables();
+			}
+		}
+	}
+
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock an incremental index update so it does not race a search.
+	 */
+	@Overwrite
+	public void update(
+		Collection<IListElementInfo<?>> updatedInfos,
+		Set<ElementSearchIndex> rebuildingIndexes,
+		Collection<IListElementInfo<?>> allInfos
+	) {
+		synchronized (allElements) {
+			synchronized (RuntimeIngredientUpdates.SEARCH_LOCK) {
+				Set<ElementSearchIndex> indexesToRebuild = EnumSet.noneOf(ElementSearchIndex.class);
+				indexesToRebuild.addAll(rebuildingIndexes);
+				if (!updatedInfos.isEmpty()) {
+					updateExistingIndexes(updatedInfos, indexesToRebuild);
+				}
+				if (!indexesToRebuild.isEmpty()) {
+					try {
+						for (ElementSearchIndex searchIndex : indexesToRebuild) {
+							rebuildSearchIndex(searchIndex, allInfos);
+						}
+					} finally {
+						updateCombinedSearchables();
+					}
+				}
 			}
 		}
 	}

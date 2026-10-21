@@ -3,14 +3,20 @@ package dev.jeiasync.mixin.search;
 import dev.jeiasync.AsyncPluginSupport;
 import dev.jeiasync.AsyncSearchCoordinator;
 import dev.jeiasync.FilterWork;
+import dev.jeiasync.JeiLoadProgress;
 import dev.jeiasync.RuntimeIngredientUpdates;
+import mezz.jei.api.helpers.IColorHelper;
 import mezz.jei.api.helpers.IModIdHelper;
 import mezz.jei.api.ingredients.IIngredientHelper;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.runtime.IIngredientManager;
+import mezz.jei.api.runtime.IIngredientVisibility;
+import mezz.jei.api.search.ISearchStorageBuilderFactory;
 import mezz.jei.common.config.IClientConfig;
+import mezz.jei.common.config.IClientToggleState;
 import mezz.jei.common.config.IIngredientFilterConfig;
 import mezz.jei.common.util.Translator;
+import mezz.jei.gui.config.IngredientTypeSortingConfig;
 import mezz.jei.gui.filter.IFilterTextSource;
 import mezz.jei.gui.ingredients.IListElement;
 import mezz.jei.gui.ingredients.IListElementInfo;
@@ -22,7 +28,6 @@ import mezz.jei.gui.overlay.ingredients.IIngredientGridSource.SourceListChangedL
 import mezz.jei.gui.search.ElementPrefixParser;
 import mezz.jei.gui.search.ElementSearch;
 import mezz.jei.gui.search.ElementSearchIndex;
-import mezz.jei.gui.search.ElementSearchLowMem;
 import mezz.jei.gui.search.IElementSearch;
 import mezz.jei.gui.search.SearchTokenizer;
 import mezz.jei.gui.search.Token;
@@ -31,6 +36,9 @@ import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -39,6 +47,7 @@ import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
@@ -59,7 +68,11 @@ import java.util.stream.Stream;
  * same pool when {@code getElements} runs on the render thread.
  * {@link IngredientElement} wrappers are built when a result is published, not during the sort.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Tooltip, tag, and mod-name indexes are not built while {@link JeiLoadProgress} is still inside
+ * plugin startup. {@link #jeiAsyncBuildDeferredSearch()} fills them in after that returns, from
+ * the element info cache, so the string allocations do not overlap recipe registration.
+ * <p>
+ * Targets upstream 15.74.0.225.
  */
 @Mixin(value = mezz.jei.gui.ingredients.IngredientFilter.class, remap = false)
 public abstract class IngredientFilterMixin {
@@ -91,13 +104,16 @@ public abstract class IngredientFilterMixin {
 	private List<IElement<?>> ingredientListCached;
 
 	@Shadow
-	private List<IListElementInfo<?>> elementInfoCache;
+	private Map<IListElement<?>, IListElementInfo<?>> elementInfoCache;
+
+	@Shadow
+	private Set<IListElement<?>> dirtyIngredients;
 
 	@Shadow
 	private Set<ElementSearchIndex> dirtySearchIndexes;
 
 	@Shadow
-	private boolean searchImplementationDirty;
+	private boolean ingredientAliasesDirty;
 
 	@Shadow
 	private boolean sortIndexesDirty;
@@ -129,8 +145,58 @@ public abstract class IngredientFilterMixin {
 		throw new AssertionError();
 	}
 
-	@Shadow
-	private IClientConfig clientConfig;
+	/**
+	 * Registers the post-startup index build. The constructor has already created the name index.
+	 * Heavy prefixes were skipped while startup was still running.
+	 */
+	@Inject(method = "<init>", at = @At("RETURN"))
+	private void jeiasync$deferHeavySearch(
+		IFilterTextSource filterTextSource,
+		IClientConfig clientConfig,
+		IIngredientFilterConfig config,
+		IIngredientManager ingredientManager,
+		Function<List<IListElementInfo<?>>, Comparator<IListElement<?>>> sortIndexUpdater,
+		List<IListElementInfo<?>> ingredients,
+		IModIdHelper modIdHelper,
+		IIngredientVisibility ingredientVisibility,
+		IngredientTypeSortingConfig ingredientTypeSortingConfig,
+		IColorHelper colorHelper,
+		ISearchStorageBuilderFactory searchStorageBuilderFactory,
+		IClientToggleState clientToggleState,
+		CallbackInfo ci
+	) {
+		if (JeiLoadProgress.isLoading()) {
+			JeiLoadProgress.deferHeavySearch(this::jeiAsyncBuildDeferredSearch);
+		}
+	}
+
+	private static Set<ElementSearchIndex> jeiAsyncHeavyIndexes() {
+		return EnumSet.of(
+			ElementSearchIndex.MOD_NAMES,
+			ElementSearchIndex.TAGS,
+			ElementSearchIndex.TOOLTIPS,
+			ElementSearchIndex.CREATIVE_TABS,
+			ElementSearchIndex.COLORS,
+			ElementSearchIndex.IDENTIFIERS
+		);
+	}
+
+	private void jeiAsyncBuildDeferredSearch() {
+		long started = System.nanoTime();
+		IElementSearch search;
+		List<IListElementInfo<?>> infos;
+		synchronized (this) {
+			search = this.elementSearch;
+			infos = new ArrayList<>(this.elementInfoCache.values());
+		}
+		if (search == null || infos.isEmpty()) {
+			return;
+		}
+		search.rebuildSearchIndexes(jeiAsyncHeavyIndexes(), infos);
+		long elapsed = (System.nanoTime() - started) / 1_000_000L;
+		org.apache.logging.log4j.LogManager.getLogger(IngredientFilterMixin.class)
+			.info("Deferred search indexes built in {} ms over {} ingredients", elapsed, infos.size());
+	}
 
 	/**
 	 * @author Mysticpasta1
@@ -148,7 +214,10 @@ public abstract class IngredientFilterMixin {
 	/** True when a config change dirtied indexes or the sort and a full filter rebuild is not pending. */
 	private boolean jeiAsyncPartialDirty() {
 		synchronized (this) {
-			return !searchImplementationDirty && (!dirtySearchIndexes.isEmpty() || sortIndexesDirty);
+			return ingredientAliasesDirty
+				|| !dirtyIngredients.isEmpty()
+				|| !dirtySearchIndexes.isEmpty()
+				|| sortIndexesDirty;
 		}
 	}
 
@@ -171,7 +240,10 @@ public abstract class IngredientFilterMixin {
 				boolean more = false;
 				synchronized (this) {
 					if (finished) {
-						more = searchImplementationDirty || !dirtySearchIndexes.isEmpty() || sortIndexesDirty;
+						more = ingredientAliasesDirty
+							|| !dirtyIngredients.isEmpty()
+							|| !dirtySearchIndexes.isEmpty()
+							|| sortIndexesDirty;
 					}
 					jeiAsyncDirtyQueued = false;
 				}
@@ -187,67 +259,80 @@ public abstract class IngredientFilterMixin {
 	 * running the ingredient walk while a frame is drawn.
 	 */
 	private void jeiAsyncApplyDirtyState() {
-		boolean fullRebuild;
-		boolean indexRebuild;
+		boolean aliases;
+		Set<IListElement<?>> dirty;
+		Set<ElementSearchIndex> indexes;
 		boolean sortRebuild;
+		IIngredientManager manager;
+		IIngredientFilterConfig filterConfig;
+		IModIdHelper mods;
+		IElementSearch search;
 		synchronized (this) {
-			fullRebuild = searchImplementationDirty;
-			indexRebuild = !fullRebuild && !dirtySearchIndexes.isEmpty();
+			aliases = ingredientAliasesDirty;
+			dirty = Collections.newSetFromMap(new IdentityHashMap<>());
+			dirty.addAll(dirtyIngredients);
+			indexes = dirtySearchIndexes.isEmpty()
+				? EnumSet.noneOf(ElementSearchIndex.class)
+				: EnumSet.copyOf(dirtySearchIndexes);
 			sortRebuild = sortIndexesDirty;
+			if (!aliases && dirty.isEmpty() && indexes.isEmpty() && !sortRebuild) {
+				return;
+			}
+			// Cleared before the work so a mark that arrives during it is visible to the requeue.
+			ingredientAliasesDirty = false;
+			dirtyIngredients.clear();
+			dirtySearchIndexes.clear();
+			sortIndexesDirty = false;
+			manager = this.ingredientManager;
+			filterConfig = this.config;
+			mods = this.modIdHelper;
+			search = this.elementSearch;
 		}
 
-		if (fullRebuild) {
-			// rebuildItemFilter recomputes every index and the comparator, so it also covers
-			// whatever else was dirty.
-			rebuildItemFilter();
-			return;
-		}
-		if (!indexRebuild && !sortRebuild) {
-			return;
-		}
-
-		List<IListElementInfo<?>> elementInfos = null;
-		if (indexRebuild) {
-			elementInfos = jeiAsyncRebuildList();
+		if (aliases || !dirty.isEmpty() || !indexes.isEmpty()) {
+			if (aliases) {
+				List<IListElementInfo<?>> current;
+				synchronized (this) {
+					current = new ArrayList<>(elementInfoCache.values());
+				}
+				for (IListElementInfo<?> info : current) {
+					if (!dirty.contains(info.getElement())) {
+						info.refreshIngredientAliases(manager, filterConfig);
+					}
+				}
+			}
+			List<IListElementInfo<?>> updated =
+				IngredientListElementFactory.rebuildList(manager, dirty, filterConfig, mods);
+			List<IListElementInfo<?>> all;
 			synchronized (this) {
-				Set<ElementSearchIndex> indexes = EnumSet.copyOf(dirtySearchIndexes);
-				dirtySearchIndexes.clear();
-				this.elementSearch.rebuildSearchIndexes(indexes, elementInfos);
+				for (IListElementInfo<?> info : updated) {
+					elementInfoCache.put(info.getElement(), info);
+				}
+				all = new ArrayList<>(elementInfoCache.values());
+			}
+			if (search != null) {
+				search.update(updated, indexes, all);
+			}
+			if (!dirty.isEmpty()) {
+				sortRebuild = true;
 			}
 			invalidateCache();
 			invalidateCandidateCache();
 		}
 
 		if (sortRebuild) {
-			if (elementInfos == null) {
-				elementInfos = jeiAsyncRebuildList();
+			List<IListElementInfo<?>> infos;
+			Function<List<IListElementInfo<?>>, Comparator<IListElement<?>>> updater;
+			synchronized (this) {
+				infos = new ArrayList<>(elementInfoCache.values());
+				updater = this.sortIndexUpdater;
 			}
-			Comparator<IListElement<?>> comparator = sortIndexUpdater.apply(elementInfos);
+			Comparator<IListElement<?>> comparator = updater.apply(infos);
 			synchronized (this) {
 				ingredientComparator = comparator;
-				sortIndexesDirty = false;
 			}
 			invalidateCache();
 		}
-	}
-
-	/**
-	 * Snapshot-then-rebuild, so the render thread only holds the monitor long enough to copy the
-	 * handful of fields this needs rather than for the whole cross-product build.
-	 */
-	private List<IListElementInfo<?>> jeiAsyncRebuildList() {
-		IElementSearch searchSnapshot;
-		IIngredientManager managerSnapshot;
-		IIngredientFilterConfig configSnapshot;
-		IModIdHelper modIdHelperSnapshot;
-		synchronized (this) {
-			searchSnapshot = this.elementSearch;
-			managerSnapshot = this.ingredientManager;
-			configSnapshot = this.config;
-			modIdHelperSnapshot = this.modIdHelper;
-		}
-		Collection<IListElement<?>> ingredients = searchSnapshot.getAllIngredients();
-		return IngredientListElementFactory.rebuildList(managerSnapshot, ingredients, configSnapshot, modIdHelperSnapshot);
 	}
 
 	/**
@@ -258,21 +343,22 @@ public abstract class IngredientFilterMixin {
 	public void rebuildItemFilter() {
 		this.invalidateCache();
 
-		FilterWork.Config configSnapshot;
+		IIngredientFilterConfig configSnapshot;
 		ElementPrefixParser parserSnapshot;
 		IIngredientManager managerSnapshot;
 		IModIdHelper modIdHelperSnapshot;
 		Function<List<IListElementInfo<?>>, Comparator<IListElement<?>>> updaterSnapshot;
 		IElementSearch searchSnapshot;
 		synchronized (this) {
-			configSnapshot = new FilterWork.Config(this.clientConfig, this.config);
+			configSnapshot = this.config;
 			parserSnapshot = this.elementPrefixParser;
 			managerSnapshot = this.ingredientManager;
 			modIdHelperSnapshot = this.modIdHelper;
 			updaterSnapshot = this.sortIndexUpdater;
 			searchSnapshot = this.elementSearch;
+			dirtyIngredients.clear();
 			dirtySearchIndexes.clear();
-			searchImplementationDirty = false;
+			ingredientAliasesDirty = false;
 			sortIndexesDirty = false;
 			invalidateCandidateCache();
 		}
@@ -282,18 +368,21 @@ public abstract class IngredientFilterMixin {
 				long started = System.nanoTime();
 				Collection<IListElement<?>> ingredients = searchSnapshot.getAllIngredients();
 				List<IListElementInfo<?>> elementInfos =
-					IngredientListElementFactory.rebuildList(managerSnapshot, ingredients, configSnapshot.filterConfig(), modIdHelperSnapshot);
+					IngredientListElementFactory.rebuildList(managerSnapshot, ingredients, configSnapshot, modIdHelperSnapshot);
 				Comparator<IListElement<?>> comparator = updaterSnapshot.apply(elementInfos);
-				IElementSearch rebuilt = jeiAsyncCreateSearch(
-					configSnapshot, parserSnapshot, elementInfos, managerSnapshot);
+				IElementSearch rebuilt = jeiAsyncCreateSearch(parserSnapshot, elementInfos, managerSnapshot);
 				return new FilterWork.Index(
-					comparator, rebuilt, (System.nanoTime() - started) / 1_000_000L);
+					comparator, rebuilt, elementInfos, (System.nanoTime() - started) / 1_000_000L);
 			},
 			result -> {
 				FilterWork.Index index = (FilterWork.Index) result;
 				synchronized (IngredientFilterMixin.this) {
 					ingredientComparator = index.comparator();
 					elementSearch = index.search();
+					elementInfoCache.clear();
+					for (IListElementInfo<?> info : index.elementInfos()) {
+						elementInfoCache.put(info.getElement(), info);
+					}
 				}
 				org.apache.logging.log4j.LogManager.getLogger(IngredientFilterMixin.class)
 					.info("Async search index build took {} ms", index.elapsedMillis());
@@ -307,14 +396,10 @@ public abstract class IngredientFilterMixin {
 	}
 
 	private static IElementSearch jeiAsyncCreateSearch(
-		FilterWork.Config config,
 		ElementPrefixParser parser,
 		List<IListElementInfo<?>> ingredients,
 		IIngredientManager ingredientManager
 	) {
-		if (config.lowMemorySlowSearchEnabled()) {
-			return new ElementSearchLowMem(parser.getNoPrefix(), ingredients);
-		}
 		return new ElementSearch(parser, ingredients, ingredientManager);
 	}
 
@@ -336,6 +421,7 @@ public abstract class IngredientFilterMixin {
 		IListElement<V> element = info.getElement();
 		synchronized (this) {
 			updateHiddenState(element);
+			this.elementInfoCache.put(element, info);
 		}
 		// Tooltip strings and the suffix-tree insert are the slow part. Holding the filter monitor
 		// across them stalls every other runtime add and the ingredient grid.
@@ -437,7 +523,6 @@ public abstract class IngredientFilterMixin {
 	@Overwrite
 	private void invalidateCandidateCache() {
 		synchronized (this) {
-			elementInfoCache = null;
 			completionRevision++;
 		}
 	}
@@ -482,18 +567,6 @@ public abstract class IngredientFilterMixin {
 
 	/**
 	 * @author Mysticpasta1
-	 * @reason Lock the implementation-dirty flag so a config change does not race the render thread.
-	 */
-	@Overwrite
-	private void markSearchImplementationDirty() {
-		synchronized (this) {
-			this.searchImplementationDirty = true;
-		}
-		notifyListenersOfChange();
-	}
-
-	/**
-	 * @author Mysticpasta1
 	 * @reason Lock the sort-dirty flag so a config change does not race the render thread.
 	 */
 	@Overwrite
@@ -512,14 +585,31 @@ public abstract class IngredientFilterMixin {
 	public Collection<IListElementInfo<?>> getAllElementInfos() {
 		updateDirtyState();
 		synchronized (this) {
-			if (elementInfoCache != null) {
-				return elementInfoCache;
+			return List.copyOf(elementInfoCache.values());
+		}
+	}
+
+	/**
+	 * @author Mysticpasta1
+	 * @reason Record changed ingredients under the filter lock. Search refresh stays on the worker.
+	 */
+	@Overwrite
+	public <V> void onIngredientsUpdated(IIngredientHelper<V> ingredientHelper, Collection<ITypedIngredient<V>> ingredients) {
+		boolean changed = false;
+		for (ITypedIngredient<V> ingredient : ingredients) {
+			Optional<IListElement<V>> matching = this.elementSearch.findElement(ingredient, ingredientHelper);
+			if (matching.isPresent()) {
+				IListElement<V> element = matching.get();
+				element.setTypedIngredient(ingredient);
+				synchronized (this) {
+					changed |= dirtyIngredients.add(element);
+				}
 			}
 		}
-		List<IListElementInfo<?>> infos = jeiAsyncRebuildList();
-		synchronized (this) {
-			elementInfoCache = infos;
-			return elementInfoCache;
+		if (changed) {
+			invalidateCache();
+			invalidateCandidateCache();
+			notifyListenersOfChange();
 		}
 	}
 

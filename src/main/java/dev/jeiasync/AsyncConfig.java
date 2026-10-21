@@ -53,6 +53,11 @@ public final class AsyncConfig {
 				// Fall through to the config file.
 			}
 		}
-		return value.get();
+		try {
+			return value.get();
+		} catch (IllegalStateException ignored) {
+			// Config is not loaded yet in a dev run; fall back to the default.
+			return minimum;
+		}
 	}
 }

@@ -1,13 +1,24 @@
 package dev.jeiasync.mixin.collect;
 
+import dev.jeiasync.CompactRecipeIndex;
+import dev.jeiasync.ItemSubtypeCache;
+import dev.jeiasync.JeiLoadProgress;
+import dev.jeiasync.MixinApplied;
+import mezz.jei.api.ingredients.IIngredientHelper;
 import mezz.jei.api.ingredients.IIngredientType;
+import mezz.jei.api.ingredients.IIngredientTypeWithSubtypes;
 import mezz.jei.api.ingredients.ITypedIngredient;
+import mezz.jei.api.ingredients.subtypes.UidContext;
 import mezz.jei.api.recipe.RecipeType;
+import mezz.jei.api.runtime.IIngredientManager;
+import mezz.jei.common.ingredients.itemStacks.TypedItemStack;
 import mezz.jei.library.recipes.collect.RecipeIngredientTable;
+import net.minecraft.world.item.Item;
 import org.jetbrains.annotations.UnmodifiableView;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
@@ -28,22 +39,37 @@ import java.util.stream.Stream;
  * <p>
  * Nothing here writes. Callers that fill the map do so through the locked table methods.
  * <p>
- * Targets upstream 15.71.0.224.
+ * While recipes are registering, a plain item is indexed by the item itself. Building an
+ * {@code ItemStack} for that lookup copies nbt and, without {@link TypedItemStackMixin}, pins the
+ * stack in a one-second cache. Items with a subtype interpreter still take the original path,
+ * because their id depends on nbt.
+ * <p>
+ * Targets upstream 15.74.0.225.
  */
 @Mixin(value = mezz.jei.library.recipes.collect.RecipeMap.class, remap = false)
 public abstract class RecipeMapMixin {
+	@Unique
+	private static volatile boolean jeiasync$uidFastPathMarked;
+
 	@Shadow
 	private RecipeIngredientTable recipeTable;
+
+	@Shadow
+	private IIngredientManager ingredientManager;
 
 	@Shadow
 	private <T, I> List<T> getRecipes(RecipeType<T> recipeType, IIngredientType<I> ingredientType, ITypedIngredient<?> ingredient) {
 		throw new AssertionError();
 	}
 
-	@Inject(method = "getRecipeTypes", at = @At("RETURN"))
+	@Inject(method = "getRecipeTypes", at = @At("RETURN"), cancellable = true)
 	private void jeiAsyncMaterializeGetRecipeTypes(CallbackInfoReturnable<Stream<RecipeType<?>>> cir) {
 		// Drain the lazy stream here, while there is still a defined moment to do it.
-		cir.setReturnValue(cir.getReturnValue().toList().stream());
+		// Mysticpasta1 — setReturnValue without cancellable throws and JEI disables this plugin.
+		Stream<RecipeType<?>> types = cir.getReturnValue();
+		if (types != null) {
+			cir.setReturnValue(types.toList().stream());
+		}
 	}
 
 	/**
@@ -54,7 +80,14 @@ public abstract class RecipeMapMixin {
 	@UnmodifiableView
 	public <T> List<T> getRecipes(RecipeType<T> recipeType, ITypedIngredient<?> ingredient) {
 		List<T> recipes = getRecipes(recipeType, ingredient.getType(), ingredient);
-		return recipes == null ? List.of() : List.copyOf(recipes);
+		if (recipes == null || recipes.isEmpty()) {
+			return List.of();
+		}
+		// Already a private snapshot of recipe references. Copying it again doubles the lookup.
+		if (recipes instanceof CompactRecipeIndex.Frozen) {
+			return recipes;
+		}
+		return List.copyOf(recipes);
 	}
 
 	/**
@@ -64,5 +97,32 @@ public abstract class RecipeMapMixin {
 	@Overwrite
 	public void compact() {
 		recipeTable.compact();
+	}
+
+	/**
+	 * @author Mysticpasta1
+	 * @reason Skip the item-stack allocation for ingredients whose recipe id is the item.
+	 */
+	@Overwrite
+	private <T> Object getIngredientUid(ITypedIngredient<T> typedIngredient) {
+		if (JeiLoadProgress.isLoading() && typedIngredient instanceof TypedItemStack typedItem) {
+			Item item = ((TypedItemStackAccess) (Object) typedItem).jeiasync$getItem();
+			if (!ItemSubtypeCache.hasSubtypes(this.ingredientManager, item)) {
+				if (!jeiasync$uidFastPathMarked) {
+					jeiasync$uidFastPathMarked = true;
+					MixinApplied.mark("collect.RecipeMapMixin");
+				}
+				return item;
+			}
+		}
+		IIngredientType<T> type = typedIngredient.getType();
+		T ingredient = typedIngredient.getIngredient();
+		IIngredientHelper<T> ingredientHelper = this.ingredientManager.getIngredientHelper(type);
+		if (type instanceof IIngredientTypeWithSubtypes<?, T> ingredientTypeWithSubtypes) {
+			if (!ingredientHelper.hasSubtypes(ingredient)) {
+				return ingredientTypeWithSubtypes.getBase(ingredient);
+			}
+		}
+		return ingredientHelper.getUid(ingredient, UidContext.Recipe);
 	}
 }

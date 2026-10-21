@@ -37,8 +37,8 @@ public final class JeiAsyncConfig {
 
 			recipeRowCapacity = builder
 				.comment(
-					"Initial size of each per-ingredient recipe row.",
-					"JEI starts these at 16, which rehashes the item row. 1 keeps that size."
+					"Kept so existing config files still load.",
+					"Recipe rows are JEI's own maps. This value is not applied."
 				)
 				.defineInRange("recipeRowCapacity", 512, 1, 1 << 20);
 		}

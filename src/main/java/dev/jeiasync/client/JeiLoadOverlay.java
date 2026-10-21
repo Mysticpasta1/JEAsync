@@ -3,6 +3,9 @@ package dev.jeiasync.client;
 import com.mojang.blaze3d.vertex.PoseStack;
 import dev.jeiasync.JeiAsyncMod;
 import dev.jeiasync.JeiLoadProgress;
+import mezz.jei.api.runtime.IJeiRuntime;
+import mezz.jei.common.Internal;
+import mezz.jei.common.gui.GuiProperties;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -10,28 +13,62 @@ import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.ScreenEvent;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.Optional;
+
 /**
- * Draws JEI's load progress on a container screen opened before startup has published a runtime.
+ * Draws JEI's load progress while startup is running, and ticks the early start check.
  * <p>
- * JEI's own overlay is registered only after startup, so until then the screen is vanilla. This
- * bar does not take input, and a failure while drawing it must not close the screen.
+ * The bar is drawn on an inventory screen that will get JEI's overlay, above that screen's
+ * window. It stays off the HUD and off screens JEI does not attach to. JEI's overlay is
+ * registered only after startup, so until then the screen is vanilla. This bar does not take
+ * input, and a failure while drawing it must not close the screen.
  */
 @Mod.EventBusSubscriber(modid = JeiAsyncMod.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE, value = Dist.CLIENT)
 public final class JeiLoadOverlay {
 	private static final Logger LOGGER = LogManager.getLogger();
 	private static boolean reportedDrawFailure;
+	private static boolean reportedStartFailure;
+	private static volatile Runnable startupCheck;
 
 	private JeiLoadOverlay() {
+	}
+
+	/** Mysticpasta1 — the client tick has to reach JEI even when JEI's own bus misses the join. */
+	public static void armStartup(Runnable check) {
+		startupCheck = check;
+	}
+
+	@SubscribeEvent
+	public static void onClientTick(TickEvent.ClientTickEvent event) {
+		if (event.phase != TickEvent.Phase.END) {
+			return;
+		}
+		Runnable check = startupCheck;
+		if (check == null) {
+			return;
+		}
+		try {
+			check.run();
+		} catch (Throwable t) {
+			if (!reportedStartFailure) {
+				reportedStartFailure = true;
+				LOGGER.error("JEI Async: could not start from the client tick", t);
+			}
+		}
 	}
 
 	@SubscribeEvent
 	public static void onRender(ScreenEvent.Render.Post event) {
 		if (!JeiLoadProgress.isVisible() || !(event.getScreen() instanceof AbstractContainerScreen<?> screen)) {
+			return;
+		}
+		if (!jeiOverlayWouldShow(screen)) {
 			return;
 		}
 		GuiGraphics graphics = event.getGuiGraphics();
@@ -50,13 +87,28 @@ public final class JeiLoadOverlay {
 		}
 	}
 
-	private static void draw(AbstractContainerScreen<?> screen, GuiGraphics graphics) {
-		Minecraft minecraft = Minecraft.getInstance();
-		Font font = minecraft.font;
-		if (font == null) {
-			return;
+	/**
+	 * Mysticpasta1 — the load bar follows the inventory screens JEI's overlay attaches to.
+	 * Before the runtime exists, that is every container {@link GuiProperties#create} accepts.
+	 * Afterwards it is whatever screen handler JEI registered, including ones that hide the overlay.
+	 */
+	private static boolean jeiOverlayWouldShow(AbstractContainerScreen<?> screen) {
+		try {
+			Optional<IJeiRuntime> runtime = Internal.getOptionalJeiRuntime();
+			if (runtime.isPresent()) {
+				return runtime.get().getScreenHelper().getGuiProperties(screen).isPresent();
+			}
+			return GuiProperties.create(screen) != null;
+		} catch (Throwable t) {
+			if (!reportedDrawFailure) {
+				reportedDrawFailure = true;
+				LOGGER.error("JEI Async: could not tell whether JEI draws on this screen", t);
+			}
+			return false;
 		}
+	}
 
+	private static void draw(AbstractContainerScreen<?> screen, GuiGraphics graphics) {
 		int barWidth = Math.min(Math.max(screen.getXSize() - 16, 120), 220);
 		int panelWidth = barWidth + 12;
 		int panelHeight = 38;
@@ -69,7 +121,17 @@ public final class JeiLoadOverlay {
 			x = Math.max(4, (screen.width - panelWidth) / 2);
 			y = Math.max(4, screen.height - panelHeight - 8);
 		}
+		drawAt(graphics, x, y, barWidth);
+	}
 
+	private static void drawAt(GuiGraphics graphics, int x, int y, int barWidth) {
+		Minecraft minecraft = Minecraft.getInstance();
+		Font font = minecraft.font;
+		if (font == null) {
+			return;
+		}
+		int panelWidth = barWidth + 12;
+		int panelHeight = 38;
 		float fraction = JeiLoadProgress.fraction();
 		int percent = (int) (fraction * 100f);
 		boolean failed = JeiLoadProgress.failed();

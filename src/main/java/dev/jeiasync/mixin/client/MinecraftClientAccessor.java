@@ -23,8 +23,14 @@ public interface MinecraftClientAccessor {
 	@Accessor("level")
 	ClientLevel jeiAsyncLevel();
 
+	@Accessor("level")
+	void jeiAsyncSetLevel(ClientLevel level);
+
 	@Accessor("player")
 	LocalPlayer jeiAsyncPlayer();
+
+	@Accessor("player")
+	void jeiAsyncSetPlayer(LocalPlayer player);
 
 	@Accessor("gameThread")
 	Thread jeiAsyncGameThread();

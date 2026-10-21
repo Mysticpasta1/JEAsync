@@ -7,6 +7,10 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 
@@ -32,21 +36,43 @@ import java.util.List;
  */
 @Mixin(value = mezz.jei.library.recipes.RecipeManager.class, remap = false)
 public abstract class RecipeManagerMixin {
+	private static final Logger JEI_ASYNC_LOGGER = LogManager.getLogger();
+
 	@Shadow
 	private RecipeManagerInternal internal;
 
 	/**
 	 * @author Mysticpasta1
 	 * @reason Drop the main-thread assertion so plugins can register recipes off the render thread.
+	 * One recipe of the wrong class used to throw out of the whole plugin, which dropped every
+	 * later category. Those entries are skipped and the rest are registered.
 	 */
 	@Overwrite
 	public <T> void addRecipes(RecipeType<T> recipeType, List<T> recipes) {
 		ErrorUtil.checkNotNull(recipeType, "recipeType");
 		ErrorUtil.checkNotNull(recipes, "recipes");
-		ErrorUtil.validateRecipes(recipeType, recipes);
+
+		Class<?> recipeClass = recipeType.getRecipeClass();
+		List<T> valid = new ArrayList<>(recipes.size());
+		int skipped = 0;
+		for (T recipe : recipes) {
+			if (recipeClass.isInstance(recipe)) {
+				valid.add(recipe);
+			} else {
+				skipped++;
+			}
+		}
+		if (skipped > 0) {
+			JEI_ASYNC_LOGGER.error(
+				"JEI Async: skipped {} recipe(s) for {} that were not {}",
+				skipped,
+				recipeType,
+				recipeClass.getName()
+			);
+		}
 
 		// No ErrorUtil.assertMainThread() here: see the class comment.
-		internal.addRecipes(recipeType, recipes);
+		internal.addRecipes(recipeType, valid);
 	}
 
 	/**
