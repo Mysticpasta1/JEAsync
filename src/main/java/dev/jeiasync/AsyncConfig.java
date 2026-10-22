@@ -12,6 +12,7 @@ import net.minecraftforge.common.ForgeConfigSpec;
 public final class AsyncConfig {
 	private static final String THREADS_PROPERTY = "jeiasync.threads";
 	private static final String ROW_CAPACITY_PROPERTY = "jeiasync.recipeRowCapacity";
+	private static final String DEFER_FOCUS_LINKS_PROPERTY = "jeiasync.deferFocusLinks";
 
 	private AsyncConfig() {
 	}
@@ -39,6 +40,27 @@ public final class AsyncConfig {
 	 */
 	public static int getRecipeRowCapacity() {
 		return resolveInt(ROW_CAPACITY_PROPERTY, JeiAsyncConfig.COMMON.recipeRowCapacity, 1);
+	}
+
+	/**
+	 * When true, recipe registration stores no focus links; the links of a recipe are built at its
+	 * first visibility query and cached.
+	 */
+	public static boolean deferFocusLinks() {
+		return resolveBoolean(DEFER_FOCUS_LINKS_PROPERTY, JeiAsyncConfig.COMMON.deferFocusLinks, true);
+	}
+
+	private static boolean resolveBoolean(String key, ForgeConfigSpec.BooleanValue value, boolean fallback) {
+		String property = System.getProperty(key);
+		if (property != null) {
+			return Boolean.parseBoolean(property.trim());
+		}
+		try {
+			return value.get();
+		} catch (IllegalStateException ignored) {
+			// Config is not loaded yet in a dev run; fall back to the default.
+			return fallback;
+		}
 	}
 
 	private static int resolveInt(String key, ForgeConfigSpec.IntValue value, int minimum) {

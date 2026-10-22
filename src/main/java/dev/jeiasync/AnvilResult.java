@@ -1,12 +1,17 @@
 package dev.jeiasync;
 
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.world.inventory.AnvilMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
+import dev.jeiasync.mixin.nbt.CapabilityProviderAccess;
+import dev.jeiasync.mixin.nbt.ItemStackTagAccess;
 
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.Map;
 
 /**
@@ -19,7 +24,14 @@ import java.util.Map;
  * Mysticpasta1 — recipe registration was spending the plugin thread inside anvil listeners.
  */
 public final class AnvilResult {
+	private static final ThreadLocal<IdentityHashMap<ItemStack, CompoundTag>> CAPS_STORE =
+		ThreadLocal.withInitial(IdentityHashMap::new);
+
 	private AnvilResult() {
+	}
+
+	public static void clearScanCaches() {
+		CAPS_STORE.get().clear();
 	}
 
 	public static ItemStack combine(ItemStack left, ItemStack right) {
@@ -43,8 +55,7 @@ public final class AnvilResult {
 		if (adding.isEmpty()) {
 			return ItemStack.EMPTY;
 		}
-		ItemStack output = left.copy();
-		Map<Enchantment, Integer> have = new HashMap<>(EnchantmentHelper.getEnchantments(output));
+		Map<Enchantment, Integer> have = new HashMap<>(EnchantmentHelper.getEnchantments(left));
 		boolean applied = false;
 		for (Map.Entry<Enchantment, Integer> entry : adding.entrySet()) {
 			Enchantment enchantment = entry.getKey();
@@ -67,9 +78,43 @@ public final class AnvilResult {
 		if (!applied) {
 			return ItemStack.EMPTY;
 		}
+		ItemStack output = buildOutput(left);
 		EnchantmentHelper.setEnchantments(have, output);
 		output.setRepairCost(AnvilMenu.calculateIncreasedRepairCost(Math.max(left.getBaseRepairCost(), book.getBaseRepairCost())));
 		return output;
+	}
+
+	/**
+	 * Builds the stack a book result produces without copying the tag content it never changes: a
+	 * fresh top-level compound whose children are the ingredient's own tag entries by reference. A
+	 * book result only replaces Enchantments and RepairCost, and both writes go into the fresh
+	 * compound, so the shared children stay untouched. Display stacks are read, never written.
+	 */
+	private static ItemStack buildOutput(ItemStack left) {
+		ItemStack output = new ItemStack(left.getItem(), left.getCount(), caps(left));
+		output.setPopTime(left.getPopTime());
+		CompoundTag source = ((ItemStackTagAccess) (Object) left).jeiasync$getTag();
+		if (source != null) {
+			CompoundTag rebuilt = new CompoundTag();
+			for (String key : source.getAllKeys()) {
+				Tag value = source.get(key);
+				if (value != null) {
+					rebuilt.put(key, value);
+				}
+			}
+			((ItemStackTagAccess) (Object) output).jeiasync$setTag(rebuilt);
+		}
+		return output;
+	}
+
+	private static CompoundTag caps(ItemStack left) {
+		IdentityHashMap<ItemStack, CompoundTag> store = CAPS_STORE.get();
+		if (store.containsKey(left)) {
+			return store.get(left);
+		}
+		CompoundTag caps = ((CapabilityProviderAccess) (Object) left).jeiasync$serializeCaps();
+		store.put(left, caps);
+		return caps;
 	}
 
 	/**

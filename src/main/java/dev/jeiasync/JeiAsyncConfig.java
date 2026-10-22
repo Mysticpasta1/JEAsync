@@ -29,11 +29,21 @@ public final class JeiAsyncConfig {
 	public static class Common {
 		public final ForgeConfigSpec.IntValue threads;
 		public final ForgeConfigSpec.IntValue recipeRowCapacity;
+		public final ForgeConfigSpec.BooleanValue deferFocusLinks;
 
 		Common(ForgeConfigSpec.Builder builder) {
 			threads = builder
 				.comment("Worker threads. 0 uses the processor count, and at least 2.")
 				.defineInRange("threads", 0, 0, 256);
+
+			deferFocusLinks = builder
+				.comment(
+					"Focus links hold the per-slot ingredient lists JEI matches clicked items against.",
+					"When this is on they are left out of recipe registration and are built once per recipe",
+					"on its first visibility query, then cached. Unqueried recipes hold nothing.",
+					"Recipe visibility results are unchanged."
+				)
+				.define("deferFocusLinks", true);
 
 			recipeRowCapacity = builder
 				.comment(

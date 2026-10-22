@@ -1,5 +1,6 @@
 package dev.jeiasync.mixin.client;
 
+import dev.jeiasync.client.RecipeSyncProgress;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.game.ClientboundUpdateRecipesPacket;
@@ -61,7 +62,9 @@ public abstract class UpdateRecipesPacketMixin {
 	private static Recipe<?> jeiasync$skipEmptyOutput(RecipeSerializer<?> serializer, ResourceLocation id, FriendlyByteBuf buf) {
 		int start = buf.readerIndex();
 		try {
-			return serializer.fromNetwork(id, buf);
+			Recipe<?> recipe = serializer.fromNetwork(id, buf);
+			RecipeSyncProgress.stamp();
+			return recipe;
 		} catch (Exception e) {
 			int boundary = jeiasync$findRecipeBoundary(buf, start);
 			if (boundary < 0) {
@@ -71,6 +74,7 @@ public abstract class UpdateRecipesPacketMixin {
 			LOGGER.warn("JEI Async: skipped recipe {} in the server packet ({}), resynced to the next recipe +{} bytes",
 				id, e.getMessage(), boundary - start);
 			buf.readerIndex(boundary);
+			RecipeSyncProgress.stamp();
 			return null;
 		}
 	}

@@ -1,21 +1,27 @@
 package dev.jeiasync.mixin.collect;
 
+import dev.jeiasync.AsyncConfig;
+import dev.jeiasync.MixinApplied;
 import mezz.jei.api.gui.builder.IIngredientAcceptor;
 import mezz.jei.api.recipe.IFocusGroup;
 import mezz.jei.api.recipe.RecipeIngredientRole;
 import mezz.jei.api.recipe.RecipeType;
 import mezz.jei.api.recipe.category.IRecipeCategory;
+import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.api.runtime.IIngredientVisibility;
 import mezz.jei.library.ingredients.RecipeIngredientSupplier;
+import mezz.jei.library.ingredients.RecipeIngredientSupplier.FocusLink;
 import mezz.jei.library.recipes.PluginManager;
 import mezz.jei.library.recipes.collect.RecipeMap;
 import mezz.jei.library.recipes.collect.RecipeTypeData;
 import mezz.jei.library.recipes.collect.RecipeTypeDataMap;
+import mezz.jei.library.util.IngredientSupplierHelper;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -66,6 +72,9 @@ public abstract class RecipeManagerInternalMixin {
 	private IIngredientVisibility ingredientVisibility;
 
 	@Shadow
+	private IIngredientManager ingredientManager;
+
+	@Shadow
 	private Comparator<IRecipeCategory<?>> recipeCategoryComparator;
 
 	@Shadow
@@ -105,10 +114,15 @@ public abstract class RecipeManagerInternalMixin {
 		Set<T> hiddenRecipes = recipeTypeData.getHiddenRecipes();
 
 List<T> addedRecipes = new ArrayList<>(recipes.size());
+		boolean deferLinks = AsyncConfig.deferFocusLinks();
 		for (T recipe : recipes) {
 			RecipeIngredientSupplier ingredientSupplier = addRecipe(recipeCategory, recipe, hiddenRecipes);
 			if (ingredientSupplier != null) {
-				recipeTypeData.addFocusLinks(recipe, ingredientSupplier.getFocusLinks());
+				if (deferLinks) {
+					jeiasync$markDeferred();
+				} else {
+					recipeTypeData.addFocusLinks(recipe, ingredientSupplier.getFocusLinks());
+				}
 				addedRecipes.add(recipe);
 			}
 		}
@@ -200,7 +214,44 @@ List<T> addedRecipes = new ArrayList<>(recipes.size());
 
 	/**
 	 * @author Mysticpasta1
-	 * @reason Lock the hidden-type set so a category hide does not race a visibility check.
+	 * @reason Deferred focus links build at a recipe's first visibility query and are then cached in
+	 * the type data, so later queries are as fast as upstream's stored links. Recipes that are never
+	 * queried hold no links. Without deferral this matches upstream: links stored at add time, or the
+	 * rebuild fallback for recipes that never went through registration.
+	 */
+	@Overwrite
+	private <T> List<FocusLink> getFocusLinks(RecipeTypeData<T> recipeTypeData, T recipe) {
+		List<FocusLink> focusLinks = recipeTypeData.getFocusLinks(recipe);
+		if (focusLinks != null) {
+			return focusLinks;
+		}
+		RecipeIngredientSupplier ingredientSupplier = IngredientSupplierHelper.getIngredientSupplier(
+			recipe,
+			recipeTypeData.getRecipeCategory(),
+			ingredientManager,
+			recipeMaps.keySet()
+		);
+		List<FocusLink> links = ingredientSupplier.getFocusLinks();
+		if (AsyncConfig.deferFocusLinks()) {
+			recipeTypeData.addFocusLinks(recipe, links);
+		}
+		return links;
+	}
+
+	@Unique
+	private static void jeiasync$markDeferred() {
+		if (MixinApplied.isApplied("collect.DeferredFocusLinks")) {
+			return;
+		}
+		MixinApplied.mark("collect.DeferredFocusLinks");
+		LOGGER.info(
+			"JEI Async: focus links build on the first visibility query instead of at recipe registration"
+		);
+	}
+
+	/**
+	 * @author Mysticpasta1
+	 * @reason Lock the hidden-type set so a visibility check does not race a hide.
 	 */
 	@Overwrite
 	public void hideRecipeCategory(RecipeType<?> recipeType) {

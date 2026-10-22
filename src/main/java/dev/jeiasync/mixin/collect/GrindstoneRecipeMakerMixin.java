@@ -2,6 +2,8 @@ package dev.jeiasync.mixin.collect;
 
 import dev.jeiasync.AnvilEnchantCache;
 import dev.jeiasync.MixinApplied;
+import dev.jeiasync.PlainStacks;
+import dev.jeiasync.mixin.nbt.ItemStackTagAccess;
 import mezz.jei.api.recipe.vanilla.IJeiGrindstoneRecipe;
 import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.common.platform.IPlatformRecipeHelper;
@@ -11,6 +13,7 @@ import mezz.jei.library.plugins.vanilla.grindstone.GrindstoneRecipeMaker;
 import mezz.jei.library.util.ResourceLocationUtil;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.inventory.GrindstoneMenu;
 import net.minecraft.world.item.Item;
@@ -32,9 +35,16 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 /**
- * Builds the same grindstone disenchant recipes without a stack per item per enchantment.
+ * Builds the same grindstone disenchant recipes without a stack per item per enchantment, and
+ * without a compound per item per recipe.
  * <p>
- * Targets upstream 15.74.0.225.
+ * Every enchanted stack for one enchantment at one level carries the identical
+ * {@code Enchantments} compound, so the scan builds that compound once and hands every stage of
+ * the level's inputs a reference to it. Repair and output stacks carry no compound at all: an
+ * undamaged damageable stack reads {@code Damage} as 0 without one. The heap had counted one
+ * compound per built stack, tens of millions in a modded pack.
+ * <p>
+ * Targets upstream 15.74.0.227.
  */
 @Mixin(value = GrindstoneRecipeMaker.class, remap = false)
 public class GrindstoneRecipeMakerMixin {
@@ -75,7 +85,7 @@ public class GrindstoneRecipeMakerMixin {
 
 	/**
 	 * @author Mysticpasta1
-	 * @reason Grindstone registration asks for enchant categories on every tool. Keep those answers until this scan returns.
+	 * @reason Grindstone registration asks for enchant categories on every tool. Keep those answers until this scan returns. The stacks the scan builds skip the constructor damage compound.
 	 */
 	@Redirect(
 		method = "getGrindstoneRecipes(Lmezz/jei/api/runtime/IIngredientManager;Lmezz/jei/common/platform/IPlatformRecipeHelper;)Ljava/util/List;",
@@ -91,16 +101,18 @@ public class GrindstoneRecipeMakerMixin {
 	) {
 		jeiasync$mark();
 		AnvilEnchantCache.enter();
+		PlainStacks.enter();
 		try {
 			return GrindstoneRecipeMaker.getGrindstoneRecipes(ingredientManager, platformHelper, grindstoneMenu);
 		} finally {
 			AnvilEnchantCache.exit();
+			PlainStacks.exit();
 		}
 	}
 
 	/**
 	 * @author Mysticpasta1
-	 * @reason The disenchant scan asked the grindstone menu for every item and every level. Enchantments that still use the category test share that answer, and every level of one enchantment shows the same plain stack.
+	 * @reason The disenchant scan asked the grindstone menu for every item and every level. Enchantments that still use the category test share that answer, and every level shows the same plain stack. One enchantment compound per level is shared by every stack of that level, instead of one compound per stack.
 	 */
 	@Overwrite
 	private static Stream<IJeiGrindstoneRecipe> getDisenchantRecipes(
@@ -152,20 +164,22 @@ public class GrindstoneRecipeMakerMixin {
 			}
 
 			List<ItemStack> bottomInputs = new ArrayList<>(supportedItems.size());
-			List<ItemStack> outputs = new ArrayList<>(supportedItems.size());
-			for (ItemStack stack : supportedItems) {
+			for (int i = 0; i < supportedItems.size(); i++) {
 				bottomInputs.add(ItemStack.EMPTY);
-				outputs.add(stack.copy());
 			}
 			for (int level = 1; level <= levels; level++) {
+				ItemStack enchantedStack = supportedItems.get(0).copy();
+				enchantedStack.enchant(enchantment, level);
+				CompoundTag sharedTag = ((ItemStackTagAccess) (Object) enchantedStack).jeiasync$getTag();
 				List<ItemStack> topInputs = new ArrayList<>(supportedItems.size());
-				for (ItemStack stack : supportedItems) {
-					ItemStack enchantedStack = stack.copy();
-					enchantedStack.enchant(enchantment, level);
-					topInputs.add(enchantedStack);
+				topInputs.add(enchantedStack);
+				for (int i = 1; i < supportedItems.size(); i++) {
+					ItemStack shared = new ItemStack(supportedItems.get(i).getItem());
+					((ItemStackTagAccess) (Object) shared).jeiasync$setTag(sharedTag);
+					topInputs.add(shared);
 				}
 				ResourceLocation uid = getDisenchantmentRecipeUid(enchantmentId, level);
-				grindstoneRecipes.add(new GrindstoneRecipe(topInputs, bottomInputs, outputs, -1, -1, uid));
+				grindstoneRecipes.add(new GrindstoneRecipe(topInputs, bottomInputs, supportedItems, -1, -1, uid));
 			}
 		}
 		return grindstoneRecipes.stream();
@@ -280,6 +294,9 @@ public class GrindstoneRecipeMakerMixin {
 		);
 		org.apache.logging.log4j.LogManager.getLogger(GrindstoneRecipeMakerMixin.class).info(
 			"JEI Async: grindstone results are built without the grindstone menu"
+		);
+		org.apache.logging.log4j.LogManager.getLogger(GrindstoneRecipeMakerMixin.class).info(
+			"JEI Async: grindstone enchanted stacks share one compound per enchantment level"
 		);
 	}
 }

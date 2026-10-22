@@ -1,7 +1,7 @@
 package dev.jeiasync.mixin.nbt;
 
 import dev.jeiasync.MixinApplied;
-import dev.jeiasync.nbt.CompactTagMap;
+import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import org.apache.logging.log4j.LogManager;
@@ -20,19 +20,19 @@ import java.util.Collections;
 import java.util.Map;
 
 /**
- * Replaces the fastutil map a compound was given with a short entry list of the same entries.
+ * Every empty compound points at one shared map instead of carrying its own fastutil table, and
+ * the first write gives that tag a fresh map of its own.
  * <p>
- * The pack builds each compound on a default-capacity open hash map. Copying those into a
- * {@link java.util.HashMap} removed the empty table slots and left a node object per key, which
- * was still most of the retained heap. A tag with at most eight keys keeps the pairs in arrays.
- * An empty compound keeps no map of its own: every empty tag points at one shared empty map, and
- * the first write gives that tag its own list. One shared mutable tag would let a write on one
- * stack show up on every other stack, so the compound object stays when something still holds it.
+ * The short-entry-list storage ({@code CompactTagMap}) that used to wrap the small maps is gone
+ * at Mysticpasta1's request: it measured as a net RAM loss on the pack and the only part worth
+ * keeping was the empty-map share.
  * <p>
- * Mysticpasta1 — the heap dump showed those maps hanging off {@code CompoundTag.tags}.
+ * One shared mutable tag would let a write on one stack show up on every other stack, so the
+ * compound object stays when something still holds it.
  */
 @Mixin(CompoundTag.class)
 public class CompoundTagMixin {
+
 	@Shadow
 	@Final
 	@Mutable
@@ -48,7 +48,7 @@ public class CompoundTagMixin {
 
 	/**
 	 * @author Mysticpasta1
-	 * @reason Copy built a fresh hash map and then the constructor copied it again. Write the copied entries straight into the short list.
+	 * @reason An empty tag's {@code copy} was building a fresh map for nothing. The shared empty one carries over and plain tags copy through vanilla.
 	 */
 	@Inject(method = "copy", at = @At("HEAD"), cancellable = true)
 	private void jeiasync$copyCompact(CallbackInfoReturnable<CompoundTag> cir) {
@@ -58,14 +58,12 @@ public class CompoundTagMixin {
 		}
 		if (current == jeiasync$sharedEmpty() || current.isEmpty()) {
 			cir.setReturnValue(jeiasync$newTag(jeiasync$sharedEmpty()));
-			return;
 		}
-		cir.setReturnValue(jeiasync$newTag(CompactTagMap.deepCopy(current)));
 	}
 
 	/**
 	 * @author Mysticpasta1
-	 * @reason Compound tags were stored in open hash maps, and the plain-map copy still kept a node per key. Keep a short entry list, and keep one shared map for every empty tag.
+	 * @reason Every empty tag shares one map for as long as it stays empty.
 	 */
 	@Inject(method = "<init>(Ljava/util/Map;)V", at = @At("RETURN"))
 	private void jeiasync$dropOpenHashMap(Map<String, Tag> ignored, CallbackInfo ci) {
@@ -76,13 +74,7 @@ public class CompoundTagMixin {
 		if (current.isEmpty()) {
 			this.tags = jeiasync$sharedEmpty();
 			jeiasync$mark();
-			return;
 		}
-		if (!CompactTagMap.isOpenHashMap(current)) {
-			return;
-		}
-		this.tags = CompactTagMap.copyOf(current);
-		jeiasync$mark();
 	}
 
 	/**
@@ -157,7 +149,7 @@ public class CompoundTagMixin {
 	@Unique
 	private void jeiasync$openForWrite() {
 		if (this.tags == jeiasync$sharedEmpty()) {
-			this.tags = new CompactTagMap();
+			this.tags = new Object2ObjectOpenHashMap<>();
 		}
 	}
 
@@ -175,7 +167,7 @@ public class CompoundTagMixin {
 		jeiasync$marked = true;
 		MixinApplied.mark("nbt.CompoundTagMixin");
 		LogManager.getLogger(CompoundTagMixin.class).info(
-			"JEI Async: compound tags keep a short entry list, and empty tags share one map and are left off recipe items"
+			"JEI Async: empty compound tags share one map, and those empty tags are left off recipe items"
 		);
 	}
 }

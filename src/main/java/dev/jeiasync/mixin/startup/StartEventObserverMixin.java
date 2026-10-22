@@ -5,6 +5,7 @@ import dev.jeiasync.JeiLoadProgress;
 import dev.jeiasync.MixinApplied;
 import dev.jeiasync.WorkerEnvironment;
 import dev.jeiasync.client.JeiLoadOverlay;
+import dev.jeiasync.client.RecipeSyncProgress;
 import mezz.jei.common.Internal;
 import mezz.jei.common.network.IConnectionToServer;
 import mezz.jei.forge.events.PermanentEventSubscriptions;
@@ -62,11 +63,12 @@ public abstract class StartEventObserverMixin {
 	private static final Logger LOGGER = LogManager.getLogger();
 	private static final int MAX_RESTARTS = 4;
 	/**
-	 * How long the tick-start may wait for the server's recipe sync before starting on the
-	 * client fallback. Vanilla sends the recipe packet within a few ticks of the join, so this
-	 * only expires when the packet was dropped entirely and there is nothing to wait for.
+	 * How far past the last recipe-packet decode activity the tick-start may wait for the sync
+	 * record before starting on the client fallback. A decode stamps its progress by recipe, so
+	 * patience is anchored at the freshest activity: a packet that reads for a minute keeps the
+	 * hold alive, and the wait only expires when everything is quiet with no sync record.
 	 */
-	private static final long SYNC_WAIT_MS = 20_000;
+	private static final long SYNC_PATIENCE_MS = 90_000;
 
 	@Shadow
 	private IConnectionToServer serverConnection;
@@ -200,8 +202,9 @@ public abstract class StartEventObserverMixin {
 	 * @author Mysticpasta1
 	 * @reason Holding the tick-start until JEI has a recipe record for this connection means the
 	 * plugins read the server sync from the first pass, and neither the fallback nor JEI's
-	 * "server does not provide recipes" warning is ever produced. The wait expires for servers
-	 * that never deliver the packet, so JEI still starts rather than staying dark.
+	 * "server does not provide recipes" warning is ever produced. Patience is anchored at the
+	 * last decode activity: a packet that reads for a minute stays held, and the wait only
+	 * expires when nothing has decoded recently and no record exists.
 	 */
 	@Unique
 	private static boolean jeiasync$waitForSync() {
@@ -215,9 +218,10 @@ public abstract class StartEventObserverMixin {
 			LOGGER.info("JEI Async: holding JEI startup until the server recipe sync arrives");
 			return true;
 		}
-		boolean expired = now - jeiasync$syncWaitStart > SYNC_WAIT_MS;
-		if (expired) {
-			LOGGER.warn("JEI Async: no server recipe sync within {} ms, starting JEI with the client fallback", SYNC_WAIT_MS);
+		long anchor = Math.max(jeiasync$syncWaitStart, RecipeSyncProgress.lastActivityMs());
+		if (now - anchor > SYNC_PATIENCE_MS) {
+			LOGGER.warn("JEI Async: no server recipe sync within {} ms of the last packet activity, starting JEI with the client fallback",
+				SYNC_PATIENCE_MS);
 			jeiasync$resetSyncWait();
 			return false;
 		}
@@ -227,6 +231,13 @@ public abstract class StartEventObserverMixin {
 	@Unique
 	private static void jeiasync$resetSyncWait() {
 		jeiasync$syncWaitStart = 0;
+	}
+
+	/** Non-free heap in whole MB, for the load log lines that compare passes and restarts. */
+	@Unique
+	private static long jeiasync$usedHeapMb() {
+		Runtime runtime = Runtime.getRuntime();
+		return Math.max(0, (runtime.totalMemory() - runtime.freeMemory()) >> 20);
 	}
 
 	/**
@@ -252,7 +263,8 @@ public abstract class StartEventObserverMixin {
 	private void jeiasync$forceStart(String source) {
 		this.jeiasync$forced = true;
 		try {
-			LOGGER.info("JEI Async: starting from the {} without a container screen", source);
+			LOGGER.info("JEI Async: starting from the {} without a container screen, heap {} MB used of {} MB max",
+				source, jeiasync$usedHeapMb(), Math.max(0, Runtime.getRuntime().maxMemory() >> 20));
 			jeiasync$invokeTransition("LISTENING");
 			jeiasync$invokeTransition("JEI_STARTED");
 			if (!JeiLoadProgress.isLoading() && !jeiasync$isStarted()) {
@@ -388,6 +400,8 @@ public abstract class StartEventObserverMixin {
 					LOGGER.warn("JEI Async: a recipe sync arrived after {} restarts and was not applied", MAX_RESTARTS);
 				}
 				JeiLoadProgress.publish();
+				LOGGER.info("JEI Async: JEI loaded with heap {} MB used of {} MB allocated", jeiasync$usedHeapMb(),
+					Runtime.getRuntime().totalMemory() >> 20);
 				return;
 			}
 		} catch (Throwable t) {

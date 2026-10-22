@@ -1,5 +1,6 @@
 package dev.jeiasync.mixin.nbt;
 
+import dev.jeiasync.PlainStacks;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -17,11 +18,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 import java.util.ArrayDeque;
 
 /**
- * Skips the damage tag a stack constructor writes when {@link ItemStack#copy()} is about to replace it.
+ * Skips the damage tag a stack constructor writes, and serves the tag field of copies.
  * <p>
  * A damageable stack stores its damage in a compound. The constructor of the copy writes
  * {@code Damage:0} into a new compound, and {@code copy} then throws that compound away and
  * installs a copy of the source tag. Grindstone registration copies every enchanted input.
+ * <p>
+ * The same constructor write is skipped while {@link PlainStacks} is active, so scans that only
+ * build display stacks do not pay for a compound per stack.
  * <p>
  * Mysticpasta1 — the plugin-loader snapshot spent those copies inside the thrown-away tag.
  */
@@ -108,6 +112,9 @@ public abstract class ItemStackMixin {
 		)
 	)
 	private boolean jeiasync$skipThrowawayDamage(Item item, ItemStack stack) {
+		if (PlainStacks.active()) {
+			return false;
+		}
 		ArrayDeque<ItemStack> sources = jeiasync$copySources.get();
 		ArrayDeque<int[]> depths = jeiasync$copyDepths.get();
 		if (!sources.isEmpty()

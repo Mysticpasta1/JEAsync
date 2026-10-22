@@ -37,6 +37,7 @@ import java.util.ConcurrentModificationException;
  */
 @Mixin(RecipeManager.class)
 public abstract class ClientRecipeManagerMixin implements ClientRecipeViews {
+
 	@Shadow
 	private Map<RecipeType<?>, Map<ResourceLocation, Recipe<?>>> recipes;
 

@@ -6,12 +6,16 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.gen.Accessor;
 
 /**
- * Writes a stack's tag the way {@link ItemStack#copy()} does, without {@code setTag}.
+ * Reads and writes a stack's tag field directly.
  * <p>
- * {@code setTag} writes a damage value and verifies the tag. Copy assigns the field.
+ * {@code setTag} writes a damage value and verifies the tag. Copy assigns the field. The getter
+ * observes the same field without a defensive copy.
  */
 @Mixin(ItemStack.class)
 public interface ItemStackTagAccess {
+	@Accessor("tag")
+	CompoundTag jeiasync$getTag();
+
 	@Accessor("tag")
 	void jeiasync$setTag(CompoundTag tag);
 }
