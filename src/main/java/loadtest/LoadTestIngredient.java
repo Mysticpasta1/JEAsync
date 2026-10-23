@@ -30,7 +30,7 @@ public final class LoadTestIngredient {
 	public static final IIngredientType<String> TYPE = new IIngredientType<>() {
 		@Override
 		public String getUid() {
-			return "jeiasync_loadtest";
+			return "jeasync_loadtest";
 		}
 
 		@Override
@@ -52,12 +52,12 @@ public final class LoadTestIngredient {
 
 		@Override
 		public String getUniqueId(String ingredient, UidContext context) {
-			return "jeiasync_loadtest:" + ingredient;
+			return "jeasync_loadtest:" + ingredient;
 		}
 
 		@Override
 		public ResourceLocation getResourceLocation(String ingredient) {
-			return new ResourceLocation("jeiasync_loadtest", "synthetic");
+			return new ResourceLocation("jeasync_loadtest", "synthetic");
 		}
 
 		@Override

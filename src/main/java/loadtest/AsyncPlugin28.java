@@ -5,7 +5,7 @@ import mezz.jei.api.registration.IRecipeRegistration;
 import net.minecraft.resources.ResourceLocation;
 
 @JeiPlugin
-public class AsyncPlugin28 implements dev.jeiasync.api.IAsyncCompatiblePlugin {
+public class AsyncPlugin28 implements dev.jeasync.api.IAsyncCompatiblePlugin {
 	public static final int WORK_MS = Integer.getInteger("loadtest.workMs", 20);
 
 	@Override

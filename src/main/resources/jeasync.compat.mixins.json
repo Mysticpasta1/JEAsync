@@ -1,0 +1,16 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "dev.jeasync.mixin.compat",
+  "plugin": "dev.jeasync.mixin.compat.JeiPlusPlusMixinPlugin",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "jeasync.refmap.json",
+  "client": [
+    "RecipeTreeFavoritesMixin",
+    "RecipeGuiLayoutsMixin",
+    "JeiPlusPlusClientClassMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

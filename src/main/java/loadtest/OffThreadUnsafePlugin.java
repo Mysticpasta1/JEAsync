@@ -19,7 +19,7 @@ import net.minecraft.resources.ResourceLocation;
  */
 @JeiPlugin
 public class OffThreadUnsafePlugin implements mezz.jei.api.IModPlugin {
-	private static final String WORKER_THREAD_PREFIX = "JEI Async Plugin Loader";
+	private static final String WORKER_THREAD_PREFIX = "jeasync Plugin Loader";
 
 	@Override
 	public ResourceLocation getPluginUid() {

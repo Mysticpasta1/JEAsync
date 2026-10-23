@@ -1,13 +1,15 @@
-# JEI Async
+# jeasync
 
-A Forge **1.20.1** add-on that speeds up [JustEnoughItems](https://www.curseforge.com/minecraft/mc-mods/jei)
-startup by running plugin registration off the main thread.
+A Forge **1.20.1** add-on (formerly "JEI Async") for
+[JustEnoughItems](https://www.curseforge.com/minecraft/mc-mods/jei): it speeds up JEI's startup by
+running plugin registration off the main thread, and it cuts the recipe memory that JEI's own
+builders grow.
 
 This is **not** a fork of JEI. It depends on a published JEI release as an ordinary dependency and
 patches it at runtime with mixins.
 
-- **Mod id:** `jeiasync`
-- **Targets:** Minecraft 1.20.1, Forge 47.x, JEI `15.71.0.224`
+- **Mod id:** `jeasync` (display name `jeasync`)
+- **Targets:** Minecraft 1.20.1, Forge 47.x, JEI `15.74.0.228`
 - **Java:** 17
 
 ## Performance, measured
@@ -24,8 +26,8 @@ runs per arm, alternating between arms so that drift in the machine's load hits 
 
 | Configuration | `Starting JEI took` median | Range | `Registering recipes` median |
 | --- | --- | --- | --- |
-| `-Pjeiasync.asyncLoading=false` - upstream behaviour, all plugins inline | **3.057 s** | 2.909 - 3.369 s | 1.897 s |
-| `-Pjeiasync.asyncVanilla=false` - every plugin eligible, `VanillaPlugin` inline | **2.476 s** | 2.387 - 2.980 s | 1.305 s |
+| `-Pjeasync.asyncLoading=false` - upstream behaviour, all plugins inline | **3.057 s** | 2.909 - 3.369 s | 1.897 s |
+| `-Pjeasync.asyncVanilla=false` - every plugin eligible, `VanillaPlugin` inline | **2.476 s** | 2.387 - 2.980 s | 1.305 s |
 | default - every plugin eligible, `VanillaPlugin` off-thread too | **2.309 s** | 1.808 - 2.534 s | 837 ms |
 
 So the default is **-0.748 s, or -24%**, against upstream behaviour, and **-0.167 s, or -7%** against
@@ -124,7 +126,7 @@ The mixins overwrite internal methods (`RecipeManager.addRecipes`, `ErrorUtil.as
 None of that is covered by JEI's API contract, so it is not stable across releases - 15.32 to 15.71
 moved `mezz.jei.core` to `mezz.jei.common`, rewrote the recipe index behind a new
 `IngredientUidIndex`, and replaced the two search-dirty booleans with an enum set. `mods.toml`
-therefore pins `[15.71.0.224,15.72)` rather than tracking the latest JEI.
+therefore pins `[15.74.0.227,15.75)` rather than tracking the latest JEI.
 
 Two of the mixins have to be compiled *in JEI's own package*, because they name package-private
 types: `IngredientUidIndex` is the backing store for both `IngredientToRecipesMap` and `RecipeMap`,
@@ -135,7 +137,7 @@ inside this mod's jar makes the jar export a package the JEI jar also exports, a
 rejects the launch before a single mixin is applied:
 
 ```
-java.lang.module.ResolutionException: Modules jei and jeiasync export
+java.lang.module.ResolutionException: Modules jei and jeasync export
 package mezz.jei.library.recipes.collect to module minecraft
 ```
 
@@ -201,7 +203,7 @@ public class MyPlugin implements IAsyncCompatiblePlugin {
 A plugin author who *knows* their registration is main-thread-only - because it touches
 `Minecraft.getInstance()`, level or block state, tile entity queries, player state, or GUI
 construction - can say so and skip the discover-by-crashing cost. Implementing the interface
-requires depending on `jeiasync`, since it is not part of JEI's API.
+requires depending on `jeasync`, since it is not part of JEI's API.
 
 ## Concurrency
 
@@ -250,28 +252,104 @@ because making it async would mean a config change could not be observed until a
 `updateDirtyState` walks the ingredient list at most once either way, sharing the rebuilt
 `IListElementInfo` list between the two paths.
 
+## Memory
+
+Three builders were pinning most of the heap. Each fix is a mixin against the same pinned JEI
+build as the rest of the add-on; compare against the JEI version, not the add-on version.
+
+### The grindstone memory explosion
+
+JEI 15.49.0.200 backported "Protect grindstone recipes from mod crashes". Before that commit, one
+mod whose enchantment threw inside the grindstone scan aborted the whole scan, and a pack could
+run for months without noticing how much JEI was not registering. After it, every
+item x enchantment x level pair is protected and completes, so the full cross product is built in
+every pack - several gigabytes on a large one. The latest JEI on 1.20.x behaves the same way; the
+crash protection is the intended behaviour, there is nothing upstream to roll back.
+
+jeasync removes the two axes that multiplied without adding information:
+
+- **Level.** A disenchant recipe exists per (enchantment, item, level). Levels above 1 repeat the
+  same enchanted input and the same plain-item result, so `grindstoneDisenchantLevels` caps the
+  level axis: `0` (the default) skips the disenchant recipes entirely, `1` keeps one recipe per
+  enchantment, and `-1` restores JEI's full cross product. Recipes that are kept carry JEI's own
+  uids, so a lower cap is JEI's recipe list with its tail removed. JEI log-spamming the failed
+  enchantment check ("Failed to check if enchantment {X} can be applied to item {Y}") still names
+  the mod whose enchantment started all of this: that enchantment does not fit the items it is
+  being tested against.
+- **Stack contents.** The enchanted stacks of one enchantment level share a single
+  `Enchantments` compound instead of one per stack, and the outputs are the plain shared stacks
+  rather than fresh grindstone-menu results. The heap cost of the stacks is now shared where it
+  can be and counted once where it cannot.
+- **Enchanting and repairing.** The anvil book-enchantment scan is the same cross product one
+  shelf over: every registered ingredient paired with every enchantment and level. The repair
+  recipes, anvil and grindstone, are small fixed vanilla pairs, but they feed categories that are
+  empty once disenchant and book-enchanting are off. All three skip by default:
+  `skipAnvilEnchantRecipes`, `skipAnvilRepairRecipes` and `skipGrindstoneRepairRecipes`. Flip one to
+  `false` and its recipes are built again; a category whose registrations are all skipped hides
+  itself.
+
+### Recipes can be dropped at registration
+
+`skippedRecipeSerializers` lists recipe serializers whose JEI recipes are dropped at registration:
+no rows, no focus links, no ingredient suppliers. The match is on the registry name of the
+underlying vanilla recipe's serializer, and only recipes that *are* vanilla `Recipe` objects can
+match, so purely synthetic JEI recipes and add-on wrappers pass through untouched.
+
+The default entry is `tconstruct:tipped_tool_transform`. Tinkers' Construct's tipped-tool table
+(`TippedToolTransformRecipe`) is a datapack recipe, and packs and add-ons write one per tool
+layout they cover, so a modded pack carries dozens to hundreds of them, and every one registers
+now that JEI protects the checks from failing. A category left with no visible recipes hides
+itself, so nothing dropped leaves an empty category behind.
+
+### Focus links are deferred until a recipe is first queried
+
+`deferFocusLinks = true` (default) keeps JEI from storing the per-slot ingredient lists at
+registration. They are built on a recipe's first visibility query and cached then, so a recipe
+that is never queried holds nothing. The grindstone cap and the deferral hit the same heap:
+one fewer list per recipe that never gets looked at.
+
+### Search strings are written to the index in batches
+
+JEI 15.74.0.225 switched ingredient search to an in-memory Lucene index, and the build holds every
+search string until the index is opened - the strings and the index bytes are both live at the
+peak. jeasync writes bounded batches of 1024 strings instead, with one writer kept open for the
+build and the merges capped, so the strings are collected while the index grows rather than all at
+once at the end.
+
 ## Configuration
 
-`config/jeiasync-client.toml`, written on first launch. Registration itself is not a setting.
-Every plugin runs off the render thread. The file only has the two sizes that are still worth tuning,
-and each comment in the file says what it does.
+`config/jeasync-client.toml`, written on first launch. Registration itself is not a setting.
+Every plugin runs off the render thread. The file has the thread count, the memory levers and a
+legacy capacity key, and each comment in the file says what it does.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `threads` | `0` | Worker pool size. `0` uses the processor count, and at least 2 |
-| `recipeRowCapacity` | `512` | Initial capacity of each per-ingredient recipe row. `1` keeps JEI's size |
+| `deferFocusLinks` | `true` | Build each recipe's focus links at its first visibility query instead of at registration. Unqueried recipes hold nothing |
+| `grindstoneDisenchantLevels` | `0` | Cap on the levels registered for JEI's grindstone disenchant recipes. `0` skips them, `-1` keeps JEI's full cross product. See [The grindstone memory explosion](#the-grindstone-memory-explosion) |
+| `skipGrindstoneRepairRecipes` | `true` | Skip the small grindstone repair-recipe pair list |
+| `skipAnvilEnchantRecipes` | `true` | Skip JEI's anvil book-enchantment recipes, the ingredient x enchantment x level cross product |
+| `skipAnvilRepairRecipes` | `true` | Skip the small anvil repair-recipe list |
+| `skippedRecipeSerializers` | `tconstruct:tipped_tool_transform` | Recipe serializer ids dropped from registration entirely. See [Recipes can be dropped at registration](#recipes-can-be-dropped-at-registration) |
+| `recipeRowCapacity` | `512` | Initial capacity of each per-ingredient recipe row. `1` keeps JEI's size. Not applied; kept so old config files load |
 
 Client-side rather than common: these govern how this client builds its indexes. Nothing here
 changes world state, so a dedicated server ignores the file.
 
 ### System property overrides
 
-A `-Djeiasync.*` property wins over the file:
+A `-Djeasync.*` property wins over the file:
 
 | Property | Overrides |
 | --- | --- |
-| `-Djeiasync.threads=N` | `threads` |
-| `-Djeiasync.recipeRowCapacity=N` | `recipeRowCapacity` |
+| `-Djeasync.threads=N` | `threads` |
+| `-Djeasync.deferFocusLinks=true/false` | `deferFocusLinks` |
+| `-Djeasync.grindstoneDisenchantLevels=N` | `grindstoneDisenchantLevels` |
+| `-Djeasync.skipGrindstoneRepairRecipes=true/false` | `skipGrindstoneRepairRecipes` |
+| `-Djeasync.skipAnvilEnchantRecipes=true/false` | `skipAnvilEnchantRecipes` |
+| `-Djeasync.skipAnvilRepairRecipes=true/false` | `skipAnvilRepairRecipes` |
+| `-Djeasync.skippedRecipeSerializers=id[,id...]` | `skippedRecipeSerializers` |
+| `-Djeasync.recipeRowCapacity=N` | `recipeRowCapacity` |
 
 The effective values are logged at startup as `[async-diag] effective settings: ...`.
 

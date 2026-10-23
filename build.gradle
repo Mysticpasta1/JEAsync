@@ -65,10 +65,10 @@ dependencies {
 }
 
 mixin {
-    add sourceSets.main, 'jeiasync.refmap.json'
-    config 'jeiasync.mixins.json'
-    config 'jeiasync.compat.mixins.json'
-    config 'jeiasync.optional.mixins.json'
+    add sourceSets.main, 'jeasync.refmap.json'
+    config 'jeasync.mixins.json'
+    config 'jeasync.compat.mixins.json'
+    config 'jeasync.optional.mixins.json'
 }
 
 tasks.named('processResources', ProcessResources) {
@@ -95,7 +95,7 @@ def modManifestAttributes = [
     'Implementation-Title' : project.name,
     'Implementation-Version': project.version,
     'Implementation-Vendor': project.modGroup,
-    'MixinConfigs'         : 'jeiasync.mixins.json,jeiasync.compat.mixins.json,jeiasync.optional.mixins.json',
+    'MixinConfigs'         : 'jeasync.mixins.json,jeasync.compat.mixins.json,jeasync.optional.mixins.json',
 ]
 
 tasks.named('jar', Jar) {
@@ -161,7 +161,7 @@ tasks.register('deployBenchmarkJarServer', Copy) {
     into layout.projectDirectory.dir('run/server/mods')
 }
 
-def forwardedProperties = ['jeiasync.threads', 'jeiasync.recipeRowCapacity', 'loadtest.workMs', 'loadtest.ingredients', 'loadtest.ingredientBlocks']
+def forwardedProperties = ['jeasync.threads', 'jeasync.recipeRowCapacity', 'loadtest.workMs', 'loadtest.ingredients', 'loadtest.ingredientBlocks']
 
 minecraft {
     runs {
