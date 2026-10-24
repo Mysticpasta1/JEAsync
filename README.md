@@ -319,20 +319,54 @@ recipes compute theirs from their own state, so either can fail while registrati
 off the render thread. A recipe that cannot answer its serializer registers unfiltered rather than
 aborting the plugin that owns it.
 
-The default for `dedupRecipeSerializers` is `tconstruct:tipped_tool_transform`. Tinkers' Construct's
-tipped-tool table (`TippedToolTransformRecipe`) is a datapack recipe, and packs and add-ons write one
-per tool layout they cover, so a modded pack carries dozens to hundreds of them, and every one
-registers now that JEI protects the checks from failing.
+The default for `dedupRecipeSerializers` is `tconstruct:tipped_tool_transform`, `tconstruct:casting_table`,
+`tconstruct:casting_basin` and `tconstruct:melting`. Tinkers' Construct's tipped-tool table
+(`TippedToolTransformRecipe`) is a datapack recipe, and packs and add-ons write one per tool layout
+they cover, so a modded pack carries dozens to hundreds of them, and every one registers now that JEI
+protects the checks from failing. Its casting and melting families are written one per part or metal
+and repeat across every cast, ore and damageable item; those are named by recipe type, because
+Tinkers gives each variant (material, composite, tool, retextured, potion, ore, damageable) its own
+serializer but registers them all under one type.
 
-### Recipes can be collapsed to one per effect
+### Recipes can be collapsed to one per effect or product
 
-`dedupRecipeSerializers` keeps a serializer's recipes but registers only the first of each distinct
-effect. The effect is read reflectively: whichever modifier-, enchantment- or affix-typed field the
-recipe class declares. Tinkers' tipped-tool transforms collapse to one recipe per tipped modifier
-by default; adding an Apothic or Apotheosis affix serializer id collapses its affix recipes to one
-per affix the same way. A recipe whose effect field cannot be read stays distinct, and only vanilla
-`Recipe` objects are matched — synthetic add-on recipes pass through untouched. A category left with no visible recipes hides
-itself, so nothing dropped leaves an empty category behind.
+`dedupRecipeSerializers` keeps a serializer's or recipe type's recipes but registers only the first of
+each distinct result. The result is read reflectively: whichever modifier-, enchantment- or
+affix-typed field the recipe class declares, and a recipe that declares none is keyed on its
+`getOutput` item or fluid, with the count and the fluid amount ignored. Tinkers' tipped-tool
+transforms collapse to one recipe per tipped modifier, and its casting and melting families to one
+recipe per part or molten metal; adding an Apothic or Apotheosis affix serializer id collapses its
+affix recipes to one per affix the same way. A recipe whose result cannot be read stays distinct, and
+only vanilla `Recipe` objects are matched — synthetic add-on recipes pass through untouched. A
+category left with no visible recipes hides itself, so nothing dropped leaves an empty category
+behind.
+
+### A mod plugin's recipe-viewer catalog is released after load
+
+Sophisticated Storage in Motion registers an ordinary JEI plugin and builds its display catalog
+during that plugin's registration callbacks, keeping the finished object in a field on the plugin
+instance. Nothing in the mod clears that field and nothing JEI does reaches it, so once load
+finishes the whole catalog - every display, every ingredient stack inside it - is pinned by a plugin
+object that is not consulted again until a player opens a moving-storage GUI. In the pack this was
+measured in, that one field was 155 MB and 14.6 million objects, about 60% of the retained heap.
+
+jeasync records the plugins of each dispatch phase and, at the load boundary, nulls every field
+whose declared type is that catalog interface, immediately before JEI is published and the heap
+figure is logged. Matching is on the declared type rather than the plugin class, so the same release
+covers the storage, backpacks and in-motion plugins, and mods that are absent match nothing. The cost
+is the first moving-storage query after load: the mod's own `getCatalog` rebuilds the catalog when
+the field is null, exactly as it does on a reload today. The release has no switch: a
+plugin that holds its catalog forever is the mod's behaviour, and load is the only point where
+nothing has been built on top of it yet. `RecipeViewerCatalogCache` does both halves, remembering the
+plugins during registration and releasing them from `StartEventObserverMixin` at the boundary.
+
+The size of that catalog is a separate matter. `addTintVariants` enumerates `DyeColor.values()` and
+adds a dyed copy of each storage item to the assembly and tier-upgrade displays, so every item is
+listed seventeen times over with nothing but its colour differing, and the tier-upgrade rows
+multiply that by the variant pairs. `capStorageTintVariants` (default `true`) empties that
+enumeration, so each item is listed once, untinted; the recipe, the tier it leads to and the item's
+own entry are unchanged, and only the tinted copies stop appearing as their own display rows.
+Turning it off builds a copy per colour again.
 
 ### Focus links are deferred until a recipe is first queried
 
@@ -363,8 +397,9 @@ each comment in the file says what it does.
 | `skipAnvilRepairRecipes` | `true` | Skip the small anvil repair-recipe list. The anvil keeps it when this is off |
 | `filterEmptyRecipes` | `true` | Drop recipes that register with no ingredients in any role |
 | `skippedRecipeSerializers` | *(empty)* | Recipe serializer ids dropped from registration entirely. See [Recipes can be dropped at registration](#recipes-can-be-dropped-at-registration) |
-| `dedupRecipeSerializers` | `tconstruct:tipped_tool_transform` | Recipe serializer ids kept but collapsed to one recipe per effect. See [Recipes can be collapsed to one per effect](#recipes-can-be-collapsed-to-one-per-effect) |
+| `dedupRecipeSerializers` | `tconstruct:tipped_tool_transform`, `tconstruct:casting_table`, `tconstruct:casting_basin`, `tconstruct:melting` | Recipe serializer or recipe type ids kept but collapsed to one recipe per effect or product. See [Recipes can be collapsed to one per effect or product](#recipes-can-be-collapsed-to-one-per-effect-or-product) |
 | `skippedCategories` | *(empty)* | JEI recipe category ids whose whole registration call is dropped, for synthetic mod-plugin recipes no serializer can name |
+| `capStorageTintVariants` | `true` | List each moving-storage item once, untinted, instead of once per dye colour. See [A mod plugin's recipe-viewer catalog is released after load](#a-mod-plugins-recipe-viewer-catalog-is-released-after-load) |
 
 Client-side rather than common: these govern how this client builds its indexes. Nothing here
 changes world state, so a dedicated server ignores the file.
@@ -383,6 +418,7 @@ A `-Djeasync.*` property wins over the file:
 | `-Djeasync.skippedRecipeSerializers=id[,id...]` | `skippedRecipeSerializers` |
 | `-Djeasync.dedupRecipeSerializers=id[,id...]` | `dedupRecipeSerializers` |
 | `-Djeasync.skippedCategories=id[,id...]` | `skippedCategories` |
+| `-Djeasync.capStorageTintVariants=true/false` | `capStorageTintVariants` |
 
 The effective values are logged at startup as `[async-diag] effective settings: ...`.
 

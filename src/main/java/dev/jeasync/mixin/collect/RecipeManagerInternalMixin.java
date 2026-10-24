@@ -35,8 +35,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
+import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.registries.ForgeRegistries;
 
 /**
@@ -66,14 +69,19 @@ import net.minecraftforge.registries.ForgeRegistries;
  * state, so both can fail while registration is still in flight. A recipe that cannot answer gets
  * registered unfiltered rather than taking its plugin down.
  * <p>
- * A serializer listed in {@code dedupRecipeSerializers} instead keeps its recipes but collapses
- * them to one per effect: Tinkers' tipped-tool transforms register the same tipped effect once per
- * tool and material, and Apotheosis and Apothic affix recipes register the same affix once per
- * item, so only the first recipe of each distinct effect is kept and the redundant copies are
- * dropped. The effect is whichever {@code Modifier}-, {@code Enchant}- or {@code Affix}-typed
- * field the recipe class declares, so one mechanism covers all of them. The category still shows
- * its real recipes, like the anvil keeping its repair list while dropping only the redundant
- * enchantment copies.
+ * A serializer or recipe type listed in {@code dedupRecipeSerializers} instead keeps its recipes but
+ * collapses them to one per result: Tinkers' tipped-tool transforms register the same tipped effect
+ * once per tool and material, Apotheosis and Apothic affix recipes register the same affix once per
+ * item, and Tinkers' casting and melting families register the same part or metal once per cast,
+ * ore and damageable item, so only the first recipe of each distinct result is kept and the
+ * redundant copies are dropped. An effect is whichever {@code Modifier}-, {@code Enchant}- or
+ * {@code Affix}-typed field the recipe class declares, and a recipe that declares none is keyed on
+ * its {@code getOutput} stack or fluid, ignoring the amount, so one mechanism covers all of them.
+ * The category still shows its real recipes, like the anvil keeping its repair list while dropping
+ * only the redundant enchantment copies. Naming a recipe type covers every serializer registered
+ * under it, which is how one entry catches all of Tinkers' casting variants; only vanilla
+ * {@code Recipe} objects can be keyed, so a plugin's synthetic recipes under a listed type register
+ * untouched.
  * <p>
  * Targets upstream 15.74.0.227 and 15.74.0.228 (class unchanged between them).
  */
@@ -141,7 +149,7 @@ public abstract class RecipeManagerInternalMixin {
 
 	/**
 	 * @author Mysticpasta1
-	 * @reason Lock category-cache invalidation so workers can add recipes together, drop the recipes whose serializer is on {@code skippedRecipeSerializers}, and collapse the recipes whose serializer is on {@code dedupRecipeSerializers} to one per effect, before anything is built for them.
+	 * @reason Lock category-cache invalidation so workers can add recipes together, drop the recipes whose serializer is on {@code skippedRecipeSerializers}, and collapse the recipes whose serializer or recipe type is on {@code dedupRecipeSerializers} to one per effect or product, before anything is built for them.
 	 */
 	@Overwrite
 	public <T> void addRecipes(RecipeType<T> recipeType, List<T> recipes) {
@@ -162,7 +170,7 @@ public abstract class RecipeManagerInternalMixin {
 					dropped++;
 					continue;
 				}
-				if (jeasync$isRedundantRecipe(recipe)) {
+				if (jeasync$isRedundantRecipe(recipeType, recipe)) {
 					deduped++;
 					continue;
 				}
@@ -338,24 +346,33 @@ public abstract class RecipeManagerInternalMixin {
 	}
 
 	/**
-	 * Whether this recipe is a duplicate effect of a serializer configured for dedup, so only the
-	 * first of each effect is kept. The effect is read reflectively from the first field the recipe
-	 * class carries: Tinkers' tipped-tool transforms store theirs as {@code modifier}, Apotheosis
-	 * and Apothic affix recipes as {@code affix} or {@code affixType}. A recipe whose effect cannot
-	 * be read stays distinct.
+	 * Whether this recipe is a redundant copy of a serializer or recipe type configured for dedup, so
+	 * only the first of each effect is kept. The effect is read reflectively from the first field the
+	 * recipe class carries: Tinkers' tipped-tool transforms store theirs as {@code modifier},
+	 * Apotheosis and Apothic affix recipes as {@code affix} or {@code affixType}. A recipe with no
+	 * such field falls back to what it produces, its {@code getOutput} stack or fluid, so Tinkers'
+	 * casting and melting recipes collapse on the part or metal they make. A recipe whose effect and
+	 * product can neither be read stays distinct.
 	 */
 	@Unique
-	private boolean jeasync$isRedundantRecipe(Object recipe) {
+	private static boolean jeasync$isRedundantRecipe(RecipeType<?> recipeType, Object recipe) {
 		List<String> dedup = AsyncConfig.dedupRecipeSerializers();
 		if (dedup.isEmpty()) {
 			return false;
 		}
-		ResourceLocation serializerId = jeasync$serializerId(recipe);
-		if (serializerId == null || !dedup.contains(serializerId.toString())) {
-			return false;
+		// A recipe type is listed as well as a serializer: Tinkers gives every casting and melting
+		// variant its own serializer but keeps them all under one recipe type, so naming the type
+		// covers the family instead of enumerating its serializers.
+		boolean listed = dedup.contains(recipeType.getUid().toString());
+		if (!listed) {
+			ResourceLocation serializerId = jeasync$serializerId(recipe);
+			listed = serializerId != null && dedup.contains(serializerId.toString());
 		}
-		String effect = jeasync$effectKey((Recipe<?>) recipe);
-		return !jeasync$dedupKeys.get().add(effect);
+		// A listed type also covers the synthetic recipes a plugin registers under it, and those have
+		// no effect field to read; only a vanilla Recipe can be keyed.
+		return listed
+			&& recipe instanceof Recipe<?> vanillaRecipe
+			&& !jeasync$dedupKeys.get().add(jeasync$effectKey(vanillaRecipe));
 	}
 
 	/**
@@ -382,7 +399,9 @@ public abstract class RecipeManagerInternalMixin {
 	 * The dedup key for a recipe: the first field whose type names an effect the recipe applies.
 	 * Tinkers' tipped-tool transform holds a {@code TippedTool.ModifierData}; Apotheosis and Apothic
 	 * affix recipes hold an {@code Affix}/{@code AffixInstance}. Matching on the type instead of the
-	 * field name keeps one mechanism for both. A recipe with no such field stays distinct.
+	 * field name keeps one mechanism for both. A recipe with no such field is keyed on what it
+	 * produces instead, which is how the casting and melting families are recognised: they have no
+	 * effect, only an output. A recipe with neither stays distinct.
 	 */
 	@Unique
 	private static String jeasync$effectKey(Recipe<?> recipe) {
@@ -401,7 +420,41 @@ public abstract class RecipeManagerInternalMixin {
 				}
 			}
 		}
+		String product = jeasync$productKey(recipe);
+		if (product != null) {
+			return product;
+		}
 		return Integer.toHexString(System.identityHashCode(recipe));
+	}
+
+	/**
+	 * A key for what a recipe produces: a no-argument {@code getOutput} returning an {@code ItemStack}
+	 * or a {@code FluidStack}, which is how Tinkers' casting and melting recipes state their result.
+	 * The count and the fluid amount are left out on purpose, so the same part or metal collapses into
+	 * one entry however much of it a recipe yields. A recipe whose product can only be reported as a
+	 * list, like a potion casting recipe, has no such accessor and returns null.
+	 */
+	@Unique
+	private static String jeasync$productKey(Recipe<?> recipe) {
+		Object product;
+		try {
+			product = recipe.getClass().getMethod("getOutput").invoke(recipe);
+		} catch (ReflectiveOperationException | RuntimeException | Error e) {
+			return null;
+		}
+		if (product instanceof ItemStack stack && !stack.isEmpty()) {
+			ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+			if (id == null) {
+				return null;
+			}
+			CompoundTag tag = stack.getTag();
+			return "item:" + id + (tag == null ? "" : tag);
+		}
+		if (product instanceof FluidStack fluid && !fluid.isEmpty()) {
+			ResourceLocation id = ForgeRegistries.FLUIDS.getKey(fluid.getFluid());
+			return id == null ? null : "fluid:" + id;
+		}
+		return null;
 	}
 
 	/**
@@ -494,7 +547,7 @@ public abstract class RecipeManagerInternalMixin {
 		}
 		MixinApplied.mark("collect.DedupRecipeSerializers");
 		LOGGER.info(
-			"jeasync: {} redundant recipe(s) from {} collapsed to one per effect",
+			"jeasync: {} redundant recipe(s) from {} collapsed to one per effect or product",
 			dropped,
 			key
 		);

@@ -25,7 +25,9 @@
   ],
   "client": [
     "MekanismJEIRecipeTypeMixin",
-    "AvaritiaJeiPluginMixin"
+    "AvaritiaJeiPluginMixin",
+    "MovingStorageTintVariantsMixin",
+    "SpawnerRecipeSortMixin"
   ],
   "injectors": {
     "defaultRequire": 0

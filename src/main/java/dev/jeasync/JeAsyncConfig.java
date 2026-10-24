@@ -34,6 +34,7 @@ public final class JeAsyncConfig {
 		public final ForgeConfigSpec.BooleanValue skipAnvilEnchantRecipes;
 		public final ForgeConfigSpec.BooleanValue skipAnvilRepairRecipes;
 		public final ForgeConfigSpec.BooleanValue filterEmptyRecipes;
+		public final ForgeConfigSpec.BooleanValue capStorageTintVariants;
 		public final ForgeConfigSpec.ConfigValue<List<? extends String>> skippedRecipeSerializers;
 		public final ForgeConfigSpec.ConfigValue<List<? extends String>> dedupRecipeSerializers;
 		public final ForgeConfigSpec.ConfigValue<List<? extends String>> skippedCategories;
@@ -84,6 +85,18 @@ public final class JeAsyncConfig {
 				)
 				.define("filterEmptyRecipes", true);
 
+			capStorageTintVariants = builder
+				.comment(
+					"Sophisticated Storage in Motion lists each moving-storage item in its assembly",
+					"and tier-upgrade displays once per dye colour, and keeps every one of those stacks",
+					"in a catalog it caches on its JEI plugin for the rest of the session. In a modded",
+					"pack that single cache was 155 MB and 14.6 million objects.",
+					"When this is on each item is listed once, untinted, and the tinted copies are not",
+					"built. The recipe, the tier it leads to, and the item's own entry are unchanged.",
+					"Turning it off builds a copy per colour again."
+				)
+				.define("capStorageTintVariants", true);
+
 			skippedRecipeSerializers = builder
 				.comment(
 					"JEI recipes whose underlying vanilla recipe has one of these recipe serializer",
@@ -105,23 +118,34 @@ public final class JeAsyncConfig {
 
 			dedupRecipeSerializers = builder
 				.comment(
-					"JEI recipes whose underlying vanilla recipe has one of these recipe serializer",
-					"ids are kept but collapsed to one recipe per effect, so the category shows its",
-					"real recipes without the redundant cross product.",
+					"JEI recipes whose underlying vanilla recipe has one of these recipe serializer or",
+					"recipe type ids are kept but collapsed to one recipe per result, so the category",
+					"shows its real recipes without the redundant cross product.",
 					"TippedToolTransformRecipe is a datapack recipe: packs and add-ons write one per",
 					"tool layout and material, so a modded pack carries dozens to hundreds that share",
 					"a handful of tipped effects. This keeps one recipe per effect and drops the",
 					"duplicate copies, like the anvil keeps its repair list and drops only",
 					"the redundant enchantment copies.",
-					"The effect is whichever modifier-, enchantment- or affix-typed field the recipe",
+					"The result is whichever modifier-, enchantment- or affix-typed field the recipe",
 					"class declares, so Apothic and Apotheosis affix serializers added here collapse",
-					"to one recipe per affix the same way.",
-					"Each entry is a recipe serializer id with namespace. Only vanilla Recipe objects",
-					"are matched; synthetic JEI recipes pass through untouched."
+					"to one recipe per affix the same way. A recipe that declares no such field is",
+					"keyed on its output item or fluid, ignoring the amount: that is how the casting",
+					"and melting families collapse, one entry per part or metal.",
+					"Naming a recipe type covers every serializer registered under it, which is why the",
+					"casting and melting entries below are recipe types: Tinkers gives each variant",
+					"(material, composite, tool, retextured, potion, ore, damageable) its own",
+					"serializer but registers them all under one type.",
+					"Each entry is an id with namespace. Only vanilla Recipe objects are matched;",
+					"synthetic JEI recipes pass through untouched."
 				)
 				.defineListAllowEmpty(
 					List.of("dedupRecipeSerializers"),
-					List.of("tconstruct:tipped_tool_transform"),
+					List.of(
+						"tconstruct:tipped_tool_transform",
+						"tconstruct:casting_table",
+						"tconstruct:casting_basin",
+						"tconstruct:melting"
+					),
 					o -> o instanceof String && ((String) o).contains(":")
 				);
 

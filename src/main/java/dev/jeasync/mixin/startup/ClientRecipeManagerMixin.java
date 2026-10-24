@@ -33,6 +33,10 @@ import java.util.ConcurrentModificationException;
  * plugins already copied the old list. The keep-check that only asks whether the manager is empty
  * does not count.
  * <p>
+ * The copies are dropped at every load boundary, not left on the manager. This mixin is applied to
+ * the {@code RecipeManager} the level holds, which outlives the load, so a copy kept here also keeps
+ * the whole recipe generation it was taken from alive for the session.
+ * <p>
  * Targets the client recipe manager. Dedicated servers do not load this mixin.
  */
 @Mixin(RecipeManager.class)
@@ -67,7 +71,13 @@ public abstract class ClientRecipeManagerMixin implements ClientRecipeViews {
 
 	@Override
 	public void jeasync$clearServed() {
-		this.jeasync$servedMap = null;
+		synchronized (this) {
+			this.jeasync$servedMap = null;
+			this.jeasync$all = null;
+			this.jeasync$allSource = null;
+			this.jeasync$byType = null;
+			this.jeasync$byTypeSource = null;
+		}
 	}
 
 	@Inject(method = "byType", at = @At("RETURN"), cancellable = true)

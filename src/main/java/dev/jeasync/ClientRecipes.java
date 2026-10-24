@@ -9,16 +9,24 @@ import net.minecraft.world.item.crafting.RecipeManager;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Puts the server's recipe list back onto the client recipe manager before a plugin reads it.
  * <p>
- * JEI's early start used to install the vanilla fallback list over that manager. Avaritia and its
- * addons copy compressor, smithing, and extreme-crafting recipes from the manager during
- * registration, so the fallback list is what they keep.
+ * JEI's early start used to install the vanilla fallback list over that manager. Any plugin that
+ * copies recipes out of the manager during registration then keeps that fallback: Avaritia and its
+ * addons take the compressor, smithing, and extreme-crafting lists this way, and an addon that
+ * does not name itself after the parent mod is indistinguishable from one that does not read the
+ * manager at all. So the restore is done for every plugin phase rather than for a chosen few.
+ * <p>
+ * Drift is decided on the ids the manager holds, not on their count. A reload can move the manager
+ * onto a different list of the same length, and JEI's fallback is exactly that.
  */
 public final class ClientRecipes {
 	private static final Logger LOGGER = LogManager.getLogger();
@@ -56,7 +64,13 @@ public final class ClientRecipes {
 		}
 		List<Recipe<?>> synced = Internal.getClientSyncedRecipes();
 		RecipeManager manager = level.getRecipeManager();
-		if (manager.getRecipes().size() == synced.size()) {
+		Set<ResourceLocation> wanted = new HashSet<>();
+		for (Recipe<?> recipe : synced) {
+			if (recipe != null) {
+				wanted.add(recipe.getId());
+			}
+		}
+		if (managerHasExactly(manager, wanted)) {
 			return;
 		}
 		Map<ResourceLocation, Recipe<?>> unique = new LinkedHashMap<>();
@@ -67,5 +81,15 @@ public final class ClientRecipes {
 		}
 		LOGGER.info("jeasync: restoring {} synced recipes before plugin registration", unique.size());
 		manager.replaceRecipes(unique.values());
+	}
+
+	/**
+	 * Whether the manager holds exactly {@code wanted}. A count alone cannot answer that: the
+	 * manager hands out a set of its recipes and the sync is a list, so a fallback list of the same
+	 * length is indistinguishable from the real one.
+	 */
+	private static boolean managerHasExactly(RecipeManager manager, Set<ResourceLocation> wanted) {
+		Set<ResourceLocation> present = manager.getRecipeIds().collect(Collectors.toSet());
+		return present.equals(wanted);
 	}
 }

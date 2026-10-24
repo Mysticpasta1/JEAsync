@@ -170,7 +170,7 @@ public class AnvilRecipeMakerMixin {
 		} finally {
 			AnvilEnchantCache.exit();
 			PlainStacks.exit();
-			jeasync$bookOutputTags.get().clear();
+			jeasync$bookOutputTags.remove();
 			AnvilResult.clearScanCaches();
 		}
 	}

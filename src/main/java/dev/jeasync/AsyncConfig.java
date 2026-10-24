@@ -20,6 +20,7 @@ public final class AsyncConfig {
 	private static final String SKIPPED_RECIPE_SERIALIZERS_PROPERTY = "jeasync.skippedRecipeSerializers";
 	private static final String DEDUP_RECIPE_SERIALIZERS_PROPERTY = "jeasync.dedupRecipeSerializers";
 	private static final String FILTER_EMPTY_RECIPES_PROPERTY = "jeasync.filterEmptyRecipes";
+	private static final String CAP_STORAGE_TINT_VARIANTS_PROPERTY = "jeasync.capStorageTintVariants";
 	private static final String SKIPPED_CATEGORIES_PROPERTY = "jeasync.skippedCategories";
 
 	/**
@@ -30,15 +31,27 @@ public final class AsyncConfig {
 	public static final List<String> DEFAULT_SKIPPED_RECIPE_SERIALIZERS = List.of();
 
 	/**
-	 * Serializer ids whose recipes are kept but collapsed to one per effect. Tinkers' Construct's
-	 * {@code tipped_tool_transform} is a datapack recipe written one per tool layout and material,
-	 * so a modded pack carries dozens to hundreds sharing a handful of tipped effects; this keeps one
-	 * recipe per effect and drops the duplicate copies, the way the anvil keeps its repair list and
-	 * drops only the redundant enchantment copies. The effect is read from whichever modifier-,
-	 * enchantment- or affix-typed field the recipe class declares, so Apothic and Apotheosis affix
-	 * serializers added to the list collapse the same way.
+	 * Serializer or recipe type ids whose recipes are kept but collapsed to one per result.
+	 * <p>
+	 * Tinkers' Construct's {@code tipped_tool_transform} is a datapack recipe written one per tool
+	 * layout and material, so a modded pack carries dozens to hundreds sharing a handful of tipped
+	 * effects. Its casting and melting families are written one per part or metal and repeat across
+	 * every cast, ore and damageable item, which is why they are named by recipe type: Tinkers gives
+	 * each variant its own serializer but registers them all under {@code casting_table},
+	 * {@code casting_basin} and {@code melting}.
+	 * <p>
+	 * One recipe per distinct result is kept and the duplicate copies are dropped, the way the anvil
+	 * keeps its repair list and drops only the redundant enchantment copies. The result is read from
+	 * whichever modifier-, enchantment- or affix-typed field the recipe class declares, so Apothic and
+	 * Apotheosis affix serializers added to the list collapse the same way; a recipe that declares no
+	 * such field is keyed on its output stack or fluid, with the amount ignored.
 	 */
-	public static final List<String> DEFAULT_DEDUP_RECIPE_SERIALIZERS = List.of("tconstruct:tipped_tool_transform");
+	public static final List<String> DEFAULT_DEDUP_RECIPE_SERIALIZERS = List.of(
+		"tconstruct:tipped_tool_transform",
+		"tconstruct:casting_table",
+		"tconstruct:casting_basin",
+		"tconstruct:melting"
+	);
 
 	private AsyncConfig() {
 	}
@@ -89,6 +102,15 @@ public final class AsyncConfig {
 	 */
 	public static boolean filterEmptyRecipes() {
 		return resolveBoolean(FILTER_EMPTY_RECIPES_PROPERTY, JeAsyncConfig.COMMON.filterEmptyRecipes, true);
+	}
+
+	/**
+	 * When true (the default), Sophisticated Storage in Motion's moving-storage displays list each
+	 * storage item once instead of once per dye colour. The tinted copies are the same recipe in a
+	 * catalog the mod caches for the session.
+	 */
+	public static boolean capStorageTintVariants() {
+		return resolveBoolean(CAP_STORAGE_TINT_VARIANTS_PROPERTY, JeAsyncConfig.COMMON.capStorageTintVariants, true);
 	}
 
 	/**

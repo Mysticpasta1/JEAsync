@@ -1,6 +1,7 @@
 package dev.jeasync.mixin.startup;
 
 import dev.jeasync.ClientRecipeViews;
+import dev.jeasync.compat.RecipeViewerCatalogCache;
 import dev.jeasync.JeiLoadProgress;
 import dev.jeasync.MixinApplied;
 import dev.jeasync.WorkerEnvironment;
@@ -399,6 +400,7 @@ public abstract class StartEventObserverMixin {
 				if (restart) {
 					LOGGER.warn("jeasync: a recipe sync arrived after {} restarts and was not applied", MAX_RESTARTS);
 				}
+				RecipeViewerCatalogCache.releaseAfterLoad();
 				JeiLoadProgress.publish();
 				LOGGER.info("jeasync: JEI loaded with heap {} MB used of {} MB allocated", jeasync$usedHeapMb(),
 					Runtime.getRuntime().totalMemory() >> 20);

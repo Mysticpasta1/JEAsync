@@ -2,6 +2,7 @@ package dev.jeasync.mixin.load;
 
 import com.google.common.base.Stopwatch;
 import dev.jeasync.AsyncPluginSupport;
+import dev.jeasync.compat.RecipeViewerCatalogCache;
 import dev.jeasync.JeiLoadProgress;
 import dev.jeasync.RegistryFreeze;
 import dev.jeasync.RenderThreadGuard;
@@ -54,9 +55,15 @@ import java.util.function.Consumer;
  * {@code tconstruct:jei_plugin} is the last of those: its melting-fuel scan walks every item, and
  * its runtime callback adds and removes ingredients, so it runs without the stuck-plugin timer.
  * Avaritia and its addons do the same wait: they copy the client recipe manager, and that copy
- * has to happen after the other plugins in the phase have stopped walking it. The synced list is
- * put back immediately before they run. Vanilla's failure is still fatal on that re-run, matching
- * upstream. A dedicated server has no client thread, so the same inline work runs on the caller.
+ * has to happen after the other plugins in the phase have stopped walking it. Vanilla's failure is
+ * still fatal on that re-run, matching upstream. A dedicated server has no client thread, so the
+ * same inline work runs on the caller.
+ * <p>
+ * The synced recipe list is put back on the client manager once at the head of a phase, before any
+ * plugin is handed to a worker or run inline. Plugins that copy the manager during registration
+ * read that list, and the addons among them do not name themselves after the mod they extend, so
+ * no plugin's name is a usable test for whether it needs the restore. It costs nothing when the
+ * manager already holds the sync, so every phase pays it.
  * <p>
  * {@code Sending ConfigManager} runs from {@code JeiStarter}'s constructor, on a mod-loading
  * worker, while other workers are still registering blocks and items. Fanning that phase out
@@ -101,6 +108,12 @@ public abstract class PluginCallerMixin {
 
 	private static void dispatchPlugins(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func) {
 		JEI_ASYNC_LOGGER.info("{}...", title);
+		// Before the first worker reads the client recipe manager, put the server's list back on it.
+		// The client thread owns that manager, and it is free here: startup holds the load, not the loop.
+		WorkerEnvironment.runOnClient(PluginCallerMixin::restoreClientRecipes);
+		// A plugin that caches a built catalog on itself keeps it for the session. Remembering the
+		// instance costs nothing and lets the load boundary hand that heap back.
+		RecipeViewerCatalogCache.remember(plugins);
 		Stopwatch stopwatch = Stopwatch.createStarted();
 		JeiLoadProgress.beginStage(title, plugins.size());
 
@@ -164,6 +177,10 @@ public abstract class PluginCallerMixin {
 	 */
 	private static void dispatchWhileRegistriesOpen(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func) {
 		JEI_ASYNC_LOGGER.info("{}...", title);
+		// This phase runs while the client thread is blocked joining the mod-loading worker, so the
+		// restore happens here on the calling thread and is not scheduled onto the client.
+		restoreClientRecipes();
+		RecipeViewerCatalogCache.remember(plugins);
 		JEI_ASYNC_LOGGER.info("jeasync: {} is staying on the calling thread because the item registry is still open", title);
 		Stopwatch stopwatch = Stopwatch.createStarted();
 		JeiLoadProgress.beginStage(title, plugins.size());
@@ -285,15 +302,20 @@ public abstract class PluginCallerMixin {
 		if (uid != null && "tconstruct".equals(uid.getNamespace()) && "jei_plugin".equals(uid.getPath())) {
 			return true;
 		}
-		return readsClientRecipes(plugin);
+		return copiesClientRecipes(plugin);
 	}
 
 	/**
 	 * Re:Avaritia's plugin uid is {@code avaritia:jei_plugin}. Addons use their own namespace or
 	 * class, and the recipes they add are datapack recipes in the same manager. Matching the name
 	 * covers both without putting those mods on the compile classpath.
+	 * <p>
+	 * The name is only a guess at who copies the manager, so it is used for ordering alone, where
+	 * over-applying it is harmless: a plugin run after the workers have joined is simply a plugin
+	 * run later. Which plugins get the synced list cannot be guessed this way, so that no longer
+	 * depends on the name.
 	 */
-	private static boolean readsClientRecipes(IModPlugin plugin) {
+	private static boolean copiesClientRecipes(IModPlugin plugin) {
 		ResourceLocation uid = plugin.getPluginUid();
 		if (uid != null) {
 			String namespace = uid.getNamespace();
@@ -360,9 +382,6 @@ public abstract class PluginCallerMixin {
 			ResourceLocation pluginUid = plugin.getPluginUid();
 			if (timer != null) {
 				timer.begin(title, pluginUid);
-			}
-			if (readsClientRecipes(plugin)) {
-				restoreClientRecipes();
 			}
 			func.accept(plugin);
 			if (timer != null) {

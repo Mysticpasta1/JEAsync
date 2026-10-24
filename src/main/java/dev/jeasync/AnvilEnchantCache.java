@@ -12,7 +12,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Set;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -23,6 +22,11 @@ import java.util.concurrent.atomic.AtomicInteger;
  * enchantment lists, has the same answer as the plain item. A stack with material data keeps its
  * own answer. The maps live on the scan thread and are dropped when the scan returns.
  * <p>
+ * A scan is not registered anywhere global. {@link #clear()} moves an epoch forward and a scan
+ * wipes itself the next time one of these methods touches it, so a worker thread that never returns
+ * to anvil work does not keep its stacks alive for the session through a registry that outlived the
+ * load.
+ * <p>
  * MCreator enchantments rebuild {@code Ingredient.of(tag)} for every item they are asked about.
  * Dissolving the tag builds a stack per match, and the next call builds that list again. The scan
  * keeps one ingredient per tag and tests membership against the items from that one dissolve.
@@ -32,7 +36,6 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class AnvilEnchantCache {
 	private static final AtomicInteger EPOCH = new AtomicInteger();
-	private static final ConcurrentLinkedQueue<Scan> ALL = new ConcurrentLinkedQueue<>();
 	private static final ThreadLocal<Scan> LOCAL = ThreadLocal.withInitial(Scan::new);
 
 	private static volatile boolean marked;
@@ -144,17 +147,12 @@ public final class AnvilEnchantCache {
 	}
 
 	/**
-	 * Drops every scan's stacks. Startup calls this when a load begins or ends, including when the
-	 * anvil method threw and its return hook did not run.
+	 * Marks every scan as stale. Startup calls this when a load begins or ends, including when the
+	 * anvil method threw and its return hook did not run. A scan wipes its own stacks the next time
+	 * one of these methods touches it, so nothing is held for a thread that never returns to work.
 	 */
 	public static void clear() {
 		EPOCH.incrementAndGet();
-		int epoch = EPOCH.get();
-		for (Scan scan : ALL) {
-			scan.depth = 0;
-			scan.epoch = epoch;
-			scan.wipe();
-		}
 	}
 
 	/**
@@ -199,14 +197,10 @@ public final class AnvilEnchantCache {
 	private static final class Scan {
 		private int depth;
 		private int epoch;
-		private final IdentityHashMap<ItemStack, Set<EnchantmentCategory>> categories = new IdentityHashMap<>(1024);
-		private final IdentityHashMap<Item, Set<EnchantmentCategory>> byItem = new IdentityHashMap<>(1024);
+		private final IdentityHashMap<ItemStack, Set<EnchantmentCategory>> categories = new IdentityHashMap<>(64);
+		private final IdentityHashMap<Item, Set<EnchantmentCategory>> byItem = new IdentityHashMap<>(64);
 		private final HashMap<TagKey<Item>, Ingredient> byTag = new HashMap<>();
 		private final IdentityHashMap<Ingredient, Set<Item>> tagItems = new IdentityHashMap<>();
-
-		private Scan() {
-			ALL.add(this);
-		}
 
 		private void wipe() {
 			this.categories.clear();

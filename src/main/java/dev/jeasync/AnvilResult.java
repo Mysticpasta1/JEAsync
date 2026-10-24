@@ -30,8 +30,12 @@ public final class AnvilResult {
 	private AnvilResult() {
 	}
 
+	/**
+	 * Drops this thread's caps store. A pooled worker keeps whatever the last scan left behind, and
+	 * an emptied {@link IdentityHashMap} still holds its backing table.
+	 */
 	public static void clearScanCaches() {
-		CAPS_STORE.get().clear();
+		CAPS_STORE.remove();
 	}
 
 	public static ItemStack combine(ItemStack left, ItemStack right) {
