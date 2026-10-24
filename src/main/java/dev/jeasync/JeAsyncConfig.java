@@ -30,13 +30,13 @@ public final class JeAsyncConfig {
 
 	public static class Common {
 		public final ForgeConfigSpec.IntValue threads;
-		public final ForgeConfigSpec.IntValue recipeRowCapacity;
 		public final ForgeConfigSpec.BooleanValue deferFocusLinks;
-		public final ForgeConfigSpec.IntValue grindstoneDisenchantLevels;
-		public final ForgeConfigSpec.BooleanValue skipGrindstoneRepairRecipes;
 		public final ForgeConfigSpec.BooleanValue skipAnvilEnchantRecipes;
 		public final ForgeConfigSpec.BooleanValue skipAnvilRepairRecipes;
+		public final ForgeConfigSpec.BooleanValue filterEmptyRecipes;
 		public final ForgeConfigSpec.ConfigValue<List<? extends String>> skippedRecipeSerializers;
+		public final ForgeConfigSpec.ConfigValue<List<? extends String>> dedupRecipeSerializers;
+		public final ForgeConfigSpec.ConfigValue<List<? extends String>> skippedCategories;
 
 		Common(ForgeConfigSpec.Builder builder) {
 			threads = builder
@@ -52,37 +52,6 @@ public final class JeAsyncConfig {
 				)
 				.define("deferFocusLinks", true);
 
-			recipeRowCapacity = builder
-				.comment(
-					"Kept so existing config files still load.",
-					"Recipe rows are JEI's own maps. This value is not applied."
-				)
-				.defineInRange("recipeRowCapacity", 512, 1, 1 << 20);
-
-			grindstoneDisenchantLevels = builder
-				.comment(
-					"JEI builds a disenchant recipe for every enchantment, item and level, up to 10.",
-					"Because a crash in one mod's enchantment took those recipes down wholesale, JEI",
-					"no longer stops early, and a pack that never saw them before now holds the full",
-					"cross product: items x enchantments x levels.",
-					"Levels above 1 repeat the same inputs and the same plain-item result, so they",
-					"multiply recipes and heap without adding information. This is the largest single",
-					"heap cost JEI builds in a big pack.",
-					"1 keeps one recipe per enchantment.",
-					"-1 restores JEI's own behaviour (all levels up to 10).",
-					"0 removes the disenchant recipes; the grindstone category hides itself if the",
-					"repair recipes do not cover it."
-				)
-				.defineInRange("grindstoneDisenchantLevels", 0, -1, 255);
-
-			skipGrindstoneRepairRecipes = builder
-				.comment(
-					"JEI builds grindstone repair recipes: the two-slot empty-result pairs, one per",
-					"repairable item. When this is on they are skipped, matching the other",
-					"grindstone recipes the add-on filters; turning it off builds them."
-				)
-				.define("skipGrindstoneRepairRecipes", true);
-
 			skipAnvilEnchantRecipes = builder
 				.comment(
 					"JEI builds anvil recipes that pair every registered ingredient with every",
@@ -95,10 +64,25 @@ public final class JeAsyncConfig {
 			skipAnvilRepairRecipes = builder
 				.comment(
 					"JEI builds anvil repair recipes: vanilla's small fixed list of repairable",
-					"pairs. On by default so the other anvil and grindstone filters behave the",
-					"same way; turning it off builds them."
+					"pairs, the same kind of list the grindstone keeps. On by default so that, with",
+					"the enchantment scan also skipped, the anvil category holds no recipes and hides",
+					"itself; turning it off builds the repair pair list."
 				)
 				.define("skipAnvilRepairRecipes", true);
+
+			filterEmptyRecipes = builder
+				.comment(
+					"JEI registers whatever a plugin put into the layout, including rows that carry no",
+					"input, no catalyst and no output. Air counts as nothing here: JEI cannot hold",
+					"an air item, so an ingredient slot the plugin fed only with air ends up with an",
+					"empty list, and the row is an empty picture that no click can look up with.",
+					"A recipe is dropped only when every role is empty. An empty output role alone",
+					"is not enough: it may hold fluids or slots the category draws itself, so",
+					"recipes that declare no output slot at all (fueling, compost, ingredient info)",
+					"are kept.",
+					"When this is on such rows are not registered; turning it off builds them again."
+				)
+				.define("filterEmptyRecipes", true);
 
 			skippedRecipeSerializers = builder
 				.comment(
@@ -106,17 +90,56 @@ public final class JeAsyncConfig {
 					"ids are dropped at registration: JEI builds no rows, no focus links and no",
 					"ingredient suppliers for them, and a category left with no visible recipes",
 					"hides itself.",
-					"TippedToolTransformRecipe, Tinkers' Construct's tipped-tool table, is a",
-					"datapack recipe: packs and add-ons write one per tool layout they cover, so",
-					"a modded pack carries dozens to hundreds, and every check is crash-protected",
-					"now, so they all register.",
+					"Tinkers' Construct's tipped-tool table is no longer listed here by default: it is",
+					"now collapsed to one recipe per effect by dedupRecipeSerializers instead of",
+					"dropped whole. Add a serializer id here to drop it entirely instead.",
 					"Each entry is a recipe serializer id with namespace, such as",
 					"tconstruct:tipped_tool_transform. Only recipes that are vanilla Recipe objects",
 					"are matched; purely synthetic JEI recipes are never filtered."
 				)
 				.defineListAllowEmpty(
 					List.of("skippedRecipeSerializers"),
+					List.of(),
+					o -> o instanceof String && ((String) o).contains(":")
+				);
+
+			dedupRecipeSerializers = builder
+				.comment(
+					"JEI recipes whose underlying vanilla recipe has one of these recipe serializer",
+					"ids are kept but collapsed to one recipe per effect, so the category shows its",
+					"real recipes without the redundant cross product.",
+					"TippedToolTransformRecipe is a datapack recipe: packs and add-ons write one per",
+					"tool layout and material, so a modded pack carries dozens to hundreds that share",
+					"a handful of tipped effects. This keeps one recipe per effect and drops the",
+					"duplicate copies, like the anvil keeps its repair list and drops only",
+					"the redundant enchantment copies.",
+					"The effect is whichever modifier-, enchantment- or affix-typed field the recipe",
+					"class declares, so Apothic and Apotheosis affix serializers added here collapse",
+					"to one recipe per affix the same way.",
+					"Each entry is a recipe serializer id with namespace. Only vanilla Recipe objects",
+					"are matched; synthetic JEI recipes pass through untouched."
+				)
+				.defineListAllowEmpty(
+					List.of("dedupRecipeSerializers"),
 					List.of("tconstruct:tipped_tool_transform"),
+					o -> o instanceof String && ((String) o).contains(":")
+				);
+
+			skippedCategories = builder
+				.comment(
+					"JEI recipe category ids whose registration is dropped entirely. This is the",
+					"category-level matching skippedRecipeSerializers cannot do: many mod plugins",
+					"hand JEI synthetic recipe objects that are not vanilla Recipe, so no serializer",
+					"can be read, but every recipe in one of these categories is still dropped from",
+					"its registration call.",
+					"The drop lands where the add-on sees the recipes, so the skip is free of rows,",
+					"focus links and catalysts, but the plugin still pays its own generation cost.",
+					"A category left with no recipes hides itself.",
+					"Each entry is a category id with namespace, such as irons_spellbooks:arcane_anvil."
+				)
+				.defineListAllowEmpty(
+					List.of("skippedCategories"),
+					List.of(),
 					o -> o instanceof String && ((String) o).contains(":")
 				);
 		}

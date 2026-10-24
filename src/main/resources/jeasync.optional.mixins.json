@@ -19,7 +19,9 @@
     "AnvilEnchantHandlerMixin",
     "AdventureEventsMixin",
     "ArcaneAnvilJeiRecipeMixin",
-    "IssItemFinderMixin"
+    "ArcaneAnvilRecipeMakerMixin",
+    "IssItemFinderMixin",
+    "AlmostFluidifiedJeiMixin"
   ],
   "client": [
     "MekanismJEIRecipeTypeMixin",

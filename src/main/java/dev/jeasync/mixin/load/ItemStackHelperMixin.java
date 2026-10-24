@@ -32,7 +32,7 @@ public abstract class ItemStackHelperMixin {
 	private IPlatformRegistry<Item> itemRegistry;
 
 	@Inject(method = "isIngredientOnServer", at = @At("HEAD"), cancellable = true, remap = false)
-	private void jeasync$matchActiveItem(ItemStack ingredient, CallbackInfoReturnable<Boolean> cir) {
+	private void jeiasync$matchActiveItem(ItemStack ingredient, CallbackInfoReturnable<Boolean> cir) {
 		MixinApplied.mark("load.ItemStackHelperMixin");
 		Item item = ingredient.getItem();
 		if (this.itemRegistry.contains(item)) {

@@ -1,118 +1,77 @@
 package dev.jeasync;
 
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.nbt.CompoundTag;
+import mezz.jei.api.runtime.IIngredientManager;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
-import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.IdentityHashMap;
+import java.util.Map;
 
 /**
- * One plain stack per item for Iron's Spells recipe registration, plus a stack that already
- * holds a spell when the plain item itself cannot be imbued.
+ * One representative stack per item, for Iron's Spells' arcane anvil item scan.
  * <p>
- * The arcane anvil, scroll forge, cauldron, and repair lists classify items. A second copy of the
- * same item with different tags does not add another recipe. Spell containers are the exception:
- * a plain stack of that item would be skipped and the imbued one would be kept.
+ * The finder walks every registered {@link ItemStack} to decide which items the arcane anvil can
+ * imbue, upgrade, or attune, and it only ever reads {@link ItemStack#getItem()}. JEI's own ingredient
+ * list can carry many thousands of stacks that share one item, so the scan does the same classification
+ * over and over. {@link dev.jeasync.compat.ArcaneRegistration} rewrites the finder's
+ * {@code getAllItemStacks} call to {@link #representative} so each item is classified once.
  * <p>
- * Mysticpasta1 — the finder walked every JEI stack, including ones that classify the same item.
+ * Mysticpasta1 — the finder walked every JEI stack to decide which items the arcane anvil can use.
  */
 public final class IssItemScan {
-	private static final String SPELL_KEY = "irons_spellbooks:spell_container";
-	private static final String LEGACY_KEY = "ISB_Spells";
-	private static volatile Method canImbue;
+	private static final Logger LOGGER = LogManager.getLogger(IssItemScan.class);
+	private static volatile boolean marked;
 
 	private IssItemScan() {
 	}
 
-	public static Collection<ItemStack> representative(Object ingredientManager) {
-		IdentityHashMap<Item, ItemStack> plain = new IdentityHashMap<>();
-		ArrayList<ItemStack> stacks = new ArrayList<>();
-		for (Item item : BuiltInRegistries.ITEM) {
-			ItemStack stack = new ItemStack(item);
-			plain.put(item, stack);
-			stacks.add(stack);
+	/**
+	 * A collection holding one stack for each distinct item the manager knows about. The argument is
+	 * the {@link IIngredientManager} the finder was built with; the rewritten call site passes it as
+	 * the receiver of the {@code getAllItemStacks} it replaces.
+	 */
+	public static Collection<ItemStack> representative(Object manager) {
+		if (!(manager instanceof IIngredientManager ingredientManager)) {
+			return manager instanceof Collection<?> collection ? asStacks(collection) : new ArrayList<>();
 		}
-		int extra = 0;
-		IdentityHashMap<Item, Boolean> added = new IdentityHashMap<>();
-		for (Object value : allStacks(ingredientManager)) {
-			if (!(value instanceof ItemStack stack) || stack.isEmpty() || !holdsSpell(stack)) {
+		Collection<ItemStack> all;
+		try {
+			all = ingredientManager.getAllItemStacks();
+		} catch (RuntimeException failure) {
+			LOGGER.warn("jeasync: arcane anvil fell back to the full item list", failure);
+			return new ArrayList<>();
+		}
+		Map<Item, ItemStack> byItem = new IdentityHashMap<>();
+		for (ItemStack stack : all) {
+			if (stack == null || stack.isEmpty()) {
 				continue;
 			}
 			Item item = stack.getItem();
-			if (added.containsKey(item)) {
-				continue;
-			}
-			ItemStack plainStack = plain.get(item);
-			if (plainStack != null && (holdsSpell(plainStack) || canImbue(plainStack))) {
-				added.put(item, Boolean.TRUE);
-				continue;
-			}
-			added.put(item, Boolean.TRUE);
-			stacks.add(stack);
-			extra++;
+			byItem.putIfAbsent(item, stack);
 		}
-		LogManager.getLogger(IssItemScan.class).info(
-			"jeasync: arcane anvil classifies {} items and {} spell-container stacks",
-			plain.size(),
-			extra
-		);
-		return stacks;
-	}
-
-	private static boolean holdsSpell(ItemStack stack) {
-		CompoundTag tag = stack.getTag();
-		return tag != null && (tag.contains(SPELL_KEY) || tag.contains(LEGACY_KEY));
-	}
-
-	private static boolean canImbue(ItemStack stack) {
-		Method method = canImbueMethod();
-		if (method == null) {
-			return false;
-		}
-		try {
-			return (Boolean) method.invoke(null, stack);
-		} catch (ReflectiveOperationException failure) {
-			return false;
-		}
-	}
-
-	private static Method canImbueMethod() {
-		Method method = canImbue;
-		if (method != null) {
-			return method;
-		}
-		try {
-			Class<?> utils = Class.forName("io.redspace.ironsspellbooks.api.util.Utils");
-			method = utils.getMethod("canImbue", ItemStack.class);
-			canImbue = method;
-			return method;
-		} catch (ReflectiveOperationException failure) {
-			return null;
-		}
-	}
-
-	@SuppressWarnings("unchecked")
-	private static Collection<Object> allStacks(Object ingredientManager) {
-		if (ingredientManager == null) {
-			return java.util.List.of();
-		}
-		try {
-			Method method = ingredientManager.getClass().getMethod("getAllItemStacks");
-			Object value = method.invoke(ingredientManager);
-			if (value instanceof Collection<?> collection) {
-				return (Collection<Object>) collection;
-			}
-		} catch (ReflectiveOperationException failure) {
-			LogManager.getLogger(IssItemScan.class).warn(
-				"jeasync: arcane anvil could not read JEI's item list ({})",
-				failure.getClass().getSimpleName()
+		if (!marked) {
+			marked = true;
+			MixinApplied.mark("compat.IssItemScan");
+			LOGGER.info(
+				"jeasync: arcane anvil classifies {} item(s) instead of {} stack(s)",
+				byItem.size(),
+				all.size()
 			);
 		}
-		return java.util.List.of();
+		return new ArrayList<>(byItem.values());
+	}
+
+	private static Collection<ItemStack> asStacks(Collection<?> collection) {
+		ArrayList<ItemStack> stacks = new ArrayList<>(collection.size());
+		for (Object element : collection) {
+			if (element instanceof ItemStack stack) {
+				stacks.add(stack);
+			}
+		}
+		return stacks;
 	}
 }

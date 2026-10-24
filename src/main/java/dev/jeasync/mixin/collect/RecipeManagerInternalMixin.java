@@ -23,10 +23,12 @@ import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -59,6 +61,19 @@ import net.minecraftforge.registries.ForgeRegistries;
  * {@code tipped_tool_transform} recipes, one per tool layout and modifier set, are the entry of
  * note. Synthetic JEI recipes and the dynamic {@code IRecipeManagerPlugin} path are unaffected.
  * A skipped recipe never returns a supplier, so the caller's bookkeeping sees nothing registered.
+ * The serializer is read once per recipe and the read is guarded: JEI's own {@code JeiShapedRecipe}
+ * resolves a deferred registry entry, and some mod recipes compute their serializer from their own
+ * state, so both can fail while registration is still in flight. A recipe that cannot answer gets
+ * registered unfiltered rather than taking its plugin down.
+ * <p>
+ * A serializer listed in {@code dedupRecipeSerializers} instead keeps its recipes but collapses
+ * them to one per effect: Tinkers' tipped-tool transforms register the same tipped effect once per
+ * tool and material, and Apotheosis and Apothic affix recipes register the same affix once per
+ * item, so only the first recipe of each distinct effect is kept and the redundant copies are
+ * dropped. The effect is whichever {@code Modifier}-, {@code Enchant}- or {@code Affix}-typed
+ * field the recipe class declares, so one mechanism covers all of them. The category still shows
+ * its real recipes, like the anvil keeping its repair list while dropping only the redundant
+ * enchantment copies.
  * <p>
  * Targets upstream 15.74.0.227 and 15.74.0.228 (class unchanged between them).
  */
@@ -68,6 +83,12 @@ public abstract class RecipeManagerInternalMixin {
 
 	@Unique
 	private static final Set<String> jeasync$skippedReported = ConcurrentHashMap.newKeySet();
+
+	@Unique
+	private static final Set<String> jeasync$dedupReported = ConcurrentHashMap.newKeySet();
+
+	@Unique
+	private static final ThreadLocal<Set<String>> jeasync$dedupKeys = ThreadLocal.withInitial(HashSet::new);
 
 	@Shadow
 	private Set<RecipeType<?>> hiddenRecipeTypes;
@@ -120,7 +141,7 @@ public abstract class RecipeManagerInternalMixin {
 
 	/**
 	 * @author Mysticpasta1
-	 * @reason Lock category-cache invalidation so workers can add recipes together, and skip the recipes whose serializer is on {@code skippedRecipeSerializers} before anything is built for them.
+	 * @reason Lock category-cache invalidation so workers can add recipes together, drop the recipes whose serializer is on {@code skippedRecipeSerializers}, and collapse the recipes whose serializer is on {@code dedupRecipeSerializers} to one per effect, before anything is built for them.
 	 */
 	@Overwrite
 	public <T> void addRecipes(RecipeType<T> recipeType, List<T> recipes) {
@@ -131,9 +152,20 @@ public abstract class RecipeManagerInternalMixin {
 
 		List<T> addedRecipes = new ArrayList<>(recipes.size());
 		boolean deferLinks = AsyncConfig.deferFocusLinks();
-		int skipped = 0;
-		for (T recipe : recipes) {
-			if (!jeasync$isSkippedRecipe(recipe)) {
+		int dropped = 0;
+		int deduped = 0;
+		Set<String> dedupKeys = jeasync$dedupKeys.get();
+		dedupKeys.clear();
+		try {
+			for (T recipe : recipes) {
+				if (jeasync$isSkippedRecipe(recipe)) {
+					dropped++;
+					continue;
+				}
+				if (jeasync$isRedundantRecipe(recipe)) {
+					deduped++;
+					continue;
+				}
 				RecipeIngredientSupplier ingredientSupplier = addRecipe(recipeCategory, recipe, hiddenRecipes);
 				if (ingredientSupplier != null) {
 					if (deferLinks) {
@@ -143,12 +175,15 @@ public abstract class RecipeManagerInternalMixin {
 					}
 					addedRecipes.add(recipe);
 				}
-			} else {
-				skipped++;
 			}
+		} finally {
+			dedupKeys.clear();
 		}
-		if (skipped > 0) {
-			jeasync$markSkipped(recipeType, skipped);
+		if (dropped > 0) {
+			jeasync$markSkipped(recipeType, dropped);
+		}
+		if (deduped > 0) {
+			jeasync$markDeduped(recipeType, deduped);
 		}
 
 		if (!addedRecipes.isEmpty()) {
@@ -175,7 +210,7 @@ public abstract class RecipeManagerInternalMixin {
 
 // hide the category if it has catalysts, but they have all been hidden
 		if (getRecipeCatalystGroups(recipeType, true).findAny().isPresent() &&
-			getRecipeCatalystGroups(recipeType, false).findAny().isEmpty())
+				getRecipeCatalystGroups(recipeType, false).findAny().isEmpty())
 		{
 			return true;
 		}
@@ -250,10 +285,10 @@ public abstract class RecipeManagerInternalMixin {
 			return focusLinks;
 		}
 		RecipeIngredientSupplier ingredientSupplier = IngredientSupplierHelper.getIngredientSupplier(
-			recipe,
-			recipeTypeData.getRecipeCategory(),
-			ingredientManager,
-			recipeMaps.keySet()
+				recipe,
+				recipeTypeData.getRecipeCategory(),
+				ingredientManager,
+				recipeMaps.keySet()
 		);
 		List<FocusLink> links = ingredientSupplier.getFocusLinks();
 		if (AsyncConfig.deferFocusLinks()) {
@@ -280,14 +315,11 @@ public abstract class RecipeManagerInternalMixin {
 	 */
 	@Unique
 	private static boolean jeasync$isSkippedRecipe(Object recipe) {
-		if (!(recipe instanceof Recipe<?> vanillaRecipe)) {
-			return false;
-		}
 		List<String> skipped = AsyncConfig.skippedRecipeSerializers();
 		if (skipped.isEmpty()) {
 			return false;
 		}
-		ResourceLocation serializerId = ForgeRegistries.RECIPE_SERIALIZERS.getKey(vanillaRecipe.getSerializer());
+		ResourceLocation serializerId = jeasync$serializerId(recipe);
 		return serializerId != null && skipped.contains(serializerId.toString());
 	}
 
@@ -301,6 +333,169 @@ public abstract class RecipeManagerInternalMixin {
 		LOGGER.info(
 			"jeasync: {} recipe(s) from {} are not registered, their serializer is in skippedRecipeSerializers",
 			skipped,
+			key
+		);
+	}
+
+	/**
+	 * Whether this recipe is a duplicate effect of a serializer configured for dedup, so only the
+	 * first of each effect is kept. The effect is read reflectively from the first field the recipe
+	 * class carries: Tinkers' tipped-tool transforms store theirs as {@code modifier}, Apotheosis
+	 * and Apothic affix recipes as {@code affix} or {@code affixType}. A recipe whose effect cannot
+	 * be read stays distinct.
+	 */
+	@Unique
+	private boolean jeasync$isRedundantRecipe(Object recipe) {
+		List<String> dedup = AsyncConfig.dedupRecipeSerializers();
+		if (dedup.isEmpty()) {
+			return false;
+		}
+		ResourceLocation serializerId = jeasync$serializerId(recipe);
+		if (serializerId == null || !dedup.contains(serializerId.toString())) {
+			return false;
+		}
+		String effect = jeasync$effectKey((Recipe<?>) recipe);
+		return !jeasync$dedupKeys.get().add(effect);
+	}
+
+	/**
+	 * The registry name of a vanilla recipe's serializer, or null when the recipe is a synthetic JEI
+	 * recipe with no serializer to read. Some mod and JEI-own recipes resolve their serializer
+	 * lazily or through their own state, and that read can fail while registration is still running
+	 * off the render thread, so a failure is treated as "no serializer" and the recipe registers
+	 * normally rather than taking the whole plugin down with it.
+	 */
+	@Unique
+	private static ResourceLocation jeasync$serializerId(Object recipe) {
+		if (!(recipe instanceof Recipe<?> vanillaRecipe)) {
+			return null;
+		}
+		try {
+			return ForgeRegistries.RECIPE_SERIALIZERS.getKey(vanillaRecipe.getSerializer());
+		} catch (RuntimeException | Error e) {
+			LOGGER.debug("jeasync: {} cannot report its serializer yet, it is registered unfiltered", vanillaRecipe.getClass().getName(), e);
+			return null;
+		}
+	}
+
+	/**
+	 * The dedup key for a recipe: the first field whose type names an effect the recipe applies.
+	 * Tinkers' tipped-tool transform holds a {@code TippedTool.ModifierData}; Apotheosis and Apothic
+	 * affix recipes hold an {@code Affix}/{@code AffixInstance}. Matching on the type instead of the
+	 * field name keeps one mechanism for both. A recipe with no such field stays distinct.
+	 */
+	@Unique
+	private static String jeasync$effectKey(Recipe<?> recipe) {
+		for (Class<?> type = recipe.getClass(); type != null && type != Object.class; type = type.getSuperclass()) {
+			for (Field field : type.getDeclaredFields()) {
+				if (jeasync$isEffectType(field.getType())) {
+					try {
+						field.setAccessible(true);
+						Object value = field.get(recipe);
+						if (value != null) {
+							return jeasync$stableKey(value);
+						}
+					} catch (ReflectiveOperationException ignored) {
+						// Inaccessible: try the next candidate field.
+					}
+				}
+			}
+		}
+		return Integer.toHexString(System.identityHashCode(recipe));
+	}
+
+	/**
+	 * A stable id for an effect value. An {@code AffixInstance} record stringifies with the rolled
+	 * stack and level, and a plain {@code Affix} with an identity hash, so neither collapses two
+	 * copies of the same affix on its own. An accessor naming the affix or modifier is preferred,
+	 * then the same accessor on a record component, then {@code toString}.
+	 */
+	@Unique
+	private static String jeasync$stableKey(Object value) {
+		String id = jeasync$nameOf(value);
+		if (id != null) {
+			return id;
+		}
+		if (value instanceof Record record) {
+			for (Field component : record.getClass().getDeclaredFields()) {
+				try {
+					component.setAccessible(true);
+					id = jeasync$nameOf(component.get(record));
+					if (id != null) {
+						return id;
+					}
+				} catch (ReflectiveOperationException ignored) {
+					// Inaccessible component: try the next.
+				}
+			}
+		}
+		return value.toString();
+	}
+
+	/**
+	 * The effect's registry-style name, if the value or one of its zero-argument accessors exposes
+	 * one: {@code getName} or {@code getRegistryName} returning a {@code Component}, {@code Holder},
+	 * {@code ResourceLocation} or {@code String}. A name with a colon keeps its namespace.
+	 */
+	@Unique
+	private static String jeasync$nameOf(Object value) {
+		if (value == null) {
+			return null;
+		}
+		if (value instanceof net.minecraft.core.Holder<?> holder && holder.isBound()) {
+			String keyed = holder.unwrapKey().map(key -> key.location().toString()).orElse(null);
+			if (keyed != null) {
+				return keyed;
+			}
+		}
+		for (String accessor : new String[] {"getName", "getRegistryName"}) {
+			try {
+				Object named = value.getClass().getMethod(accessor).invoke(value);
+				if (named instanceof ResourceLocation location) {
+					return location.toString();
+				}
+				if (named instanceof net.minecraft.core.Holder<?> holder && holder.isBound()) {
+					String keyedName = holder.unwrapKey().map(key -> key.location().toString()).orElse(null);
+					if (keyedName != null) {
+						return keyedName;
+					}
+				}
+				if (named != null && !(named instanceof net.minecraft.world.item.ItemStack)) {
+					String text = named.toString();
+					int style = text.indexOf('{');
+					if (style > 0) {
+						text = text.substring(0, style);
+					}
+					// Recipe.getName() is the group, usually empty; a blank key would collapse
+					// every recipe of the serializer into one.
+					if (text.isBlank() || text.equals("{}")) {
+						continue;
+					}
+					return text;
+				}
+			} catch (ReflectiveOperationException ignored) {
+				// Accessor absent or not public: try the next.
+			}
+		}
+		return null;
+	}
+
+	@Unique
+	private static boolean jeasync$isEffectType(Class<?> field) {
+		String name = field.getSimpleName();
+		return name.contains("Affix") || name.contains("Modifier") || name.contains("Enchant") || name.contains("MobEffect");
+	}
+
+	@Unique
+	private static void jeasync$markDeduped(RecipeType<?> recipeType, int dropped) {
+		String key = recipeType.getUid().toString();
+		if (!jeasync$dedupReported.add(key)) {
+			return;
+		}
+		MixinApplied.mark("collect.DedupRecipeSerializers");
+		LOGGER.info(
+			"jeasync: {} redundant recipe(s) from {} collapsed to one per effect",
+			dropped,
 			key
 		);
 	}

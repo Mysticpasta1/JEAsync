@@ -27,6 +27,11 @@ import java.util.Collection;
  * The skip hooks {@code Internal.hasClientRecipes}. That name is the same in the published JEI
  * jar. {@code RecipeManager.replaceRecipes} is not: the jar calls it by its SRG name.
  * <p>
+ * JEI's fallback recipe notices at the end of start ("does not provide recipes", "vanilla server")
+ * are dropped as well. With the start held for the server recipe sync, a fallback notice can only
+ * mean the start ran before the sync arrived; JEI re-inspects on the sync landing anyway, so the
+ * notice is noise. JEI's own "sent recipes but none were usable" error stays visible.
+ * <p>
  * Targets upstream 15.74.0.225.
  */
 @Mixin(value = JeiStarter.class, remap = false)
@@ -35,6 +40,19 @@ public abstract class JeiStarterMixin {
 	private void jeasync$restoreSyncedRecipes(CallbackInfo ci) {
 		MixinApplied.mark("startup.JeiStarterMixin");
 		ClientRecipes.restoreIfDrifted();
+	}
+
+	@Inject(
+		method = "verifyClientRecipes",
+		at = @At("HEAD"),
+		remap = false,
+		cancellable = true,
+		require = 1
+	)
+	private void jeasync$dropFallbackRecipeWarnings(Minecraft minecraft, CallbackInfo ci) {
+		if (!(Internal.hasClientSyncedRecipes() && Internal.getClientSyncedRecipes().isEmpty())) {
+			ci.cancel();
+		}
 	}
 
 	@Redirect(

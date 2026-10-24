@@ -2,8 +2,8 @@ package dev.jeasync.mixin.load;
 
 import com.google.common.base.Stopwatch;
 import dev.jeasync.AsyncPluginSupport;
-import dev.jeasync.FailedPlugin;
 import dev.jeasync.JeiLoadProgress;
+import dev.jeasync.RegistryFreeze;
 import dev.jeasync.RenderThreadGuard;
 import dev.jeasync.WorkerEnvironment;
 import mezz.jei.api.IModPlugin;
@@ -39,20 +39,30 @@ import java.util.function.Consumer;
  * This stays a head injection, at low priority, so other add-ons that also inject here still run.
  * Cancelling skips JEI's own loop. Overwriting the method would delete their injectors.
  * <p>
- * A plugin that throws off-thread is recorded as incompatible. A client-queue failure, and a
- * category icon the ingredient list rejects, are re-run once on the client thread. A duplicate id
- * or a missing class stays as the error from the attempt that threw. A concurrent modification is
- * re-run once on this thread after the other workers in the phase have finished, and the plugin
- * stays eligible for later phases when that re-run succeeds. Any other failure is re-run once on
- * this thread and stays on this thread afterwards. {@code tconstruct:jei_plugin} waits until the
- * other plugins in the phase have finished, then runs on this thread without the stuck-plugin
- * timer. Its melting-fuel scan walks every item, and its runtime callback adds and removes
- * ingredients. Avaritia and its addons do the same wait: they copy the client recipe manager, and
- * that copy has to happen after the other plugins in the phase have stopped walking it. The synced
- * list is put back immediately before they run. Vanilla's failure is still fatal on that re-run,
- * matching upstream. A plugin that
- * needs the render thread can implement
- * {@link dev.jeasync.api.IAsyncCompatiblePlugin} and return false.
+ * A plugin that throws off-thread is recorded as incompatible. A duplicate id or a missing class
+ * stays as the error from the attempt that threw. A concurrent modification is re-run once after
+ * the other workers in the phase have finished, and the plugin stays eligible for later phases
+ * when that re-run succeeds. Any other failure is re-run once, and a demoted plugin is re-run for
+ * every later phase, on the client thread: the startup thread is still off the render thread, so
+ * a plugin that needed the client thread used to fail there a second time. The retries happen
+ * after the phase's workers have joined and are waited on by the startup thread, which is safe
+ * because the render thread is back in its loop while startup owns the load.
+ * <p>
+ * Anything that cannot run on a worker is held until that phase's workers have joined, then run
+ * on the client thread, in the order the plugins were listed. That is a plugin that opted out of
+ * async, a plugin already demoted, and a plugin that has to see the other plugins' results.
+ * {@code tconstruct:jei_plugin} is the last of those: its melting-fuel scan walks every item, and
+ * its runtime callback adds and removes ingredients, so it runs without the stuck-plugin timer.
+ * Avaritia and its addons do the same wait: they copy the client recipe manager, and that copy
+ * has to happen after the other plugins in the phase have stopped walking it. The synced list is
+ * put back immediately before they run. Vanilla's failure is still fatal on that re-run, matching
+ * upstream. A dedicated server has no client thread, so the same inline work runs on the caller.
+ * <p>
+ * {@code Sending ConfigManager} runs from {@code JeiStarter}'s constructor, on a mod-loading
+ * worker, while other workers are still registering blocks and items. Fanning that phase out
+ * reads {@code ForgeRegistry}'s maps during those writes, and the maps drop entries that were
+ * already stored, vanilla and modded. Any phase that arrives before the item registry is frozen
+ * stays on the calling thread. Later phases still use the pool.
  * <p>
  * Targets upstream 15.71.0.224.
  */
@@ -69,6 +79,13 @@ public abstract class PluginCallerMixin {
 	}
 
 	private static void callOnPluginsAsync(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func) {
+		// Before the registry freezes, stay on this thread and do not install client handles or
+		// pull services. Both of those reach into registries that other mod-loading workers are
+		// still filling.
+		if (!RegistryFreeze.itemsLocked()) {
+			dispatchWhileRegistriesOpen(title, plugins, func);
+			return;
+		}
 		boolean onClient = WorkerEnvironment.isClientGameThread();
 		if (onClient) {
 			RenderThreadGuard.enterClientDispatch();
@@ -89,35 +106,13 @@ public abstract class PluginCallerMixin {
 
 		List<CompletableFuture<Void>> pending = new ArrayList<>();
 		List<IModPlugin> inline = new ArrayList<>();
-		List<IModPlugin> afterWorkers = new ArrayList<>();
-		List<FailedPlugin> retry = Collections.synchronizedList(new ArrayList<>());
+		List<IModPlugin> retry = Collections.synchronizedList(new ArrayList<>());
 
-		try (PluginCallerTimer timer = new PluginCallerTimer()) {
-			int i = 0;
-			while (i < plugins.size() && !AsyncPluginSupport.isAsyncCapable(plugins.get(i))) {
-				IModPlugin plugin = plugins.get(i++);
-				if (runsAfterWorkers(plugin)) {
-					afterWorkers.add(plugin);
-					continue;
-				}
+		for (IModPlugin plugin : plugins) {
+			if (needsInline(plugin)) {
 				inline.add(plugin);
-				runInline(plugin, func, title, timer, true);
-			}
-
-			List<IModPlugin> trailingInline = new ArrayList<>();
-			for (; i < plugins.size(); i++) {
-				IModPlugin plugin = plugins.get(i);
-				if (runsAfterWorkers(plugin)) {
-					afterWorkers.add(plugin);
-				} else if (AsyncPluginSupport.isAsyncCapable(plugin)) {
-				pending.add(dispatchAsync(title, plugin, func, retry));
 			} else {
-					inline.add(plugin);
-					trailingInline.add(plugin);
-				}
-			}
-			for (IModPlugin plugin : trailingInline) {
-				runInline(plugin, func, title, timer, true);
+				pending.add(dispatchAsync(title, plugin, func, retry));
 			}
 		}
 
@@ -130,20 +125,57 @@ public abstract class PluginCallerMixin {
 			retryFailed(title, retry, func);
 		}
 
-		for (IModPlugin plugin : afterWorkers) {
-			inline.add(plugin);
-			ResourceLocation pluginUid = plugin.getPluginUid();
-			JEI_ASYNC_LOGGER.info("Plugin {} is running after the other plugins for {}", pluginUid, title);
-			Stopwatch pluginWatch = Stopwatch.createStarted();
-			if (runInline(plugin, func, title, null, true)) {
-				JEI_ASYNC_LOGGER.info("Plugin {} registered during {} in {}", pluginUid, title, pluginWatch);
+		// Inline work waits until the workers for this phase have joined, then runs on the client
+		// thread. The startup thread is not the render thread.
+		try (PluginCallerTimer timer = new PluginCallerTimer()) {
+			for (IModPlugin plugin : inline) {
+				boolean after = runsAfterWorkers(plugin);
+				ResourceLocation pluginUid = plugin.getPluginUid();
+				Stopwatch pluginWatch = after ? Stopwatch.createStarted() : null;
+				if (after) {
+					JEI_ASYNC_LOGGER.info("Plugin {} is running after the other plugins for {}", pluginUid, title);
+				}
+				boolean ok = runOnClientThread(plugin, func, title, after ? null : timer, true);
+				if (after && ok) {
+					JEI_ASYNC_LOGGER.info("Plugin {} registered during {} in {}", pluginUid, title, pluginWatch);
+				}
 			}
 		}
 
+		// Summarise any plugins that failed during this phase so the failure is not
+		// buried among tens of thousands of log lines.
+		List<String> failedPlugins = new ArrayList<>();
+		for (IModPlugin p : plugins) {
+			if (AsyncPluginSupport.isIncompatible(p)) {
+				failedPlugins.add(String.valueOf(p.getPluginUid()));
+			}
+		}
+		if (!failedPlugins.isEmpty()) {
+			JEI_ASYNC_LOGGER.error("jeasync: {} plugin(s) failed during {} and were skipped: {}", failedPlugins.size(), title, failedPlugins);
+		}
 		JEI_ASYNC_LOGGER.info("{} took {} ({} inline, {} async)", title, stopwatch, inline.size(), pending.size());
 	}
 
-	private static CompletableFuture<Void> dispatchAsync(String title, IModPlugin plugin, Consumer<IModPlugin> func, List<FailedPlugin> retry) {
+	/**
+	 * Runs one phase on the thread that called it.
+	 * <p>
+	 * The item registry is still accepting registrations, so a worker must not touch it. Upstream
+	 * runs this phase on the mod-loading thread that constructed JEI. This does the same.
+	 */
+	private static void dispatchWhileRegistriesOpen(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func) {
+		JEI_ASYNC_LOGGER.info("{}...", title);
+		JEI_ASYNC_LOGGER.info("jeasync: {} is staying on the calling thread because the item registry is still open", title);
+		Stopwatch stopwatch = Stopwatch.createStarted();
+		JeiLoadProgress.beginStage(title, plugins.size());
+		try (PluginCallerTimer timer = new PluginCallerTimer()) {
+			for (IModPlugin plugin : plugins) {
+				runInline(plugin, func, title, timer, true);
+			}
+		}
+		JEI_ASYNC_LOGGER.info("{} took {} ({} inline, 0 async)", title, stopwatch, plugins.size());
+	}
+
+	private static CompletableFuture<Void> dispatchAsync(String title, IModPlugin plugin, Consumer<IModPlugin> func, List<IModPlugin> retry) {
 		return CompletableFuture.runAsync(() -> WorkerEnvironment.runRegistration(() -> {
 			ResourceLocation pluginUid = plugin.getPluginUid();
 			Stopwatch stopwatch = Stopwatch.createStarted();
@@ -162,13 +194,10 @@ public abstract class PluginCallerMixin {
 				if (!raced) {
 					AsyncPluginSupport.markIncompatible(plugin, title);
 				}
-				boolean onClient = again && needsClientThread(e);
 				if (again) {
-					retry.add(new FailedPlugin(plugin, onClient));
+					retry.add(plugin);
 				}
-				String where = !again ? "" : onClient
-					? " (running it on the client thread instead)"
-					: " (running it on the calling thread instead)";
+				String where = again ? " (running it on " + retryThread() + " instead)" : "";
 				JEI_ASYNC_LOGGER.error("Caught an error from mod plugin off-thread: {} {}{}", plugin.getClass(), pluginUid, where, e);
 			} finally {
 				JeiLoadProgress.pluginFinished();
@@ -177,41 +206,21 @@ public abstract class PluginCallerMixin {
 	}
 
 	/**
-	 * Re-runs plugins whose async attempt failed in this phase. Progress was already counted.
-	 * Plugins demoted by an earlier phase already ran on this thread above, so they are not in
-	 * {@code retry}.
+	 * Re-runs plugins whose async attempt failed in this phase, once the workers have joined, on
+	 * the client thread. Progress was already counted. Plugins demoted by an earlier phase are
+	 * in the inline list and run on the client thread after this, so they are not in {@code retry}.
 	 */
-	private static void retryFailed(String title, List<FailedPlugin> retry, Consumer<IModPlugin> func) {
+	private static void retryFailed(String title, List<IModPlugin> retry, Consumer<IModPlugin> func) {
 		if (retry.isEmpty()) {
 			return;
 		}
-		List<FailedPlugin> failed = new ArrayList<>(retry);
-		int onClient = 0;
-		int onCaller = 0;
-		for (FailedPlugin plugin : failed) {
-			if (plugin.onClient) {
-				onClient++;
-			} else {
-				onCaller++;
-			}
-		}
-		if (onClient > 0) {
-			JEI_ASYNC_LOGGER.warn("Re-running {} plugin(s) on the client thread for {}...", onClient, title);
-		}
-		if (onCaller > 0) {
-			JEI_ASYNC_LOGGER.warn("Re-running {} plugin(s) on the calling thread for {}...", onCaller, title);
-		}
-		for (FailedPlugin plugin : failed) {
+		List<IModPlugin> failed = new ArrayList<>(retry);
+		JEI_ASYNC_LOGGER.warn("Re-running {} plugin(s) on {} for {}...", failed.size(), retryThread(), title);
+		for (IModPlugin plugin : failed) {
 			try {
-				boolean ok;
-				if (plugin.onClient) {
-					WorkerEnvironment.runOnClient(() -> runInline(plugin.plugin, func, title, null, false));
-					ok = true;
-				} else {
-					ok = runInline(plugin.plugin, func, title, null, false);
-				}
-				if (!ok && !AsyncPluginSupport.isIncompatible(plugin.plugin)) {
-					AsyncPluginSupport.markIncompatible(plugin.plugin, title);
+				boolean ok = runOnClientThread(plugin, func, title, null, false);
+				if (!ok && !AsyncPluginSupport.isIncompatible(plugin)) {
+					AsyncPluginSupport.markIncompatible(plugin, title);
 				}
 			} catch (CompletionException e) {
 				Throwable cause = e.getCause();
@@ -257,10 +266,19 @@ public abstract class PluginCallerMixin {
 	}
 
 	/**
+	 * A plugin stays off the worker pool when it opted out, when an earlier phase demoted it, or
+	 * when it has to run after the other plugins in the phase. Those run on the client thread
+	 * after the workers join.
+	 */
+	private static boolean needsInline(IModPlugin plugin) {
+		return runsAfterWorkers(plugin) || !AsyncPluginSupport.isAsyncCapable(plugin);
+	}
+
+	/**
 	 * Tinkers' Construct iterates every item while other plugins remove ingredients, then adds
 	 * potion fluids at runtime. Avaritia and its addons copy the client recipe manager. Both run
-	 * after the workers for the phase have joined, on this thread, and without the stuck-plugin
-	 * timer.
+	 * after the workers for the phase have joined, on the client thread, and without the
+	 * stuck-plugin timer.
 	 */
 	private static boolean runsAfterWorkers(IModPlugin plugin) {
 		ResourceLocation uid = plugin.getPluginUid();
@@ -317,21 +335,24 @@ public abstract class PluginCallerMixin {
 		return false;
 	}
 
-	private static boolean needsClientThread(Throwable error) {
-		Throwable current = error;
-		while (current != null) {
-			if (current instanceof RenderThreadGuard.OffThreadClientExecutorException) {
-				return true;
-			}
-			if (current instanceof IllegalArgumentException) {
-				String message = current.getMessage();
-				if (message != null && message.contains("cannot be used as a drawable ingredient")) {
-					return true;
-				}
-			}
-			current = current.getCause();
-		}
-		return false;
+	private static String retryThread() {
+		return FMLEnvironment.dist.isDedicatedServer() ? "the calling thread" : "the client thread";
+	}
+
+	/**
+	 * Runs a plugin callback on the client thread when startup owns the caller.
+	 * <p>
+	 * This is the thread JEI itself would have used. A plugin that failed off-thread used to be
+	 * re-run on the startup worker, which is still off the render thread; a plugin that needed the
+	 * client thread failed there a second time. A call already on the client thread, and a
+	 * dedicated server, run directly. Waiting here is safe: the render thread is back in its loop
+	 * while startup owns the load, and the phase's workers have already been joined. Inline plugins
+	 * use this only after that join.
+	 */
+	private static boolean runOnClientThread(IModPlugin plugin, Consumer<IModPlugin> func, String title, PluginCallerTimer timer, boolean trackProgress) {
+		boolean[] ran = {false};
+		WorkerEnvironment.runOnClient(() -> ran[0] = runInline(plugin, func, title, timer, trackProgress));
+		return ran[0];
 	}
 
 	private static boolean runInline(IModPlugin plugin, Consumer<IModPlugin> func, String title, PluginCallerTimer timer, boolean trackProgress) {

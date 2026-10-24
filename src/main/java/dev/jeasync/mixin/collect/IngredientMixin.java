@@ -7,11 +7,16 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
 import org.apache.logging.log4j.LogManager;
+import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Overwrite;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+import java.util.Arrays;
 
 /**
  * Reuses one dissolved tag ingredient for the whole anvil or grindstone scan.
@@ -27,6 +32,16 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class IngredientMixin {
 	@Unique
 	private static volatile boolean jeasync$marked;
+
+	@Unique
+	private static volatile boolean jeasync$getItemsMarked;
+
+	@Shadow
+	@Nullable
+	private ItemStack[] itemStacks;
+
+	@Shadow
+	private Ingredient.Value[] values;
 
 	/**
 	 * @author Mysticpasta1
@@ -84,6 +99,36 @@ public abstract class IngredientMixin {
 		MixinApplied.mark("collect.IngredientMixin");
 		LogManager.getLogger(IngredientMixin.class).info(
 			"jeasync: anvil and grindstone scans reuse one dissolved tag ingredient per tag"
+		);
+	}
+
+	/**
+	 * @author Mysticpasta1
+	 * @reason Dissolve the stack cache under a lock so a parallel first read cannot publish a torn array.
+	 */
+	@Overwrite
+	public ItemStack[] getItems() {
+		synchronized (this) {
+			if (this.itemStacks == null) {
+				jeasync$markGetItems();
+				this.itemStacks = Arrays.stream(this.values)
+					.flatMap((value) -> value.getItems().stream())
+					.distinct()
+					.toArray(ItemStack[]::new);
+			}
+			return this.itemStacks;
+		}
+	}
+
+	@Unique
+	private static void jeasync$markGetItems() {
+		if (jeasync$getItemsMarked) {
+			return;
+		}
+		jeasync$getItemsMarked = true;
+		MixinApplied.mark("collect.IngredientMixin");
+		LogManager.getLogger(IngredientMixin.class).info(
+			"jeasync: Ingredient.getItems resolves its stack cache under a lock"
 		);
 	}
 }

@@ -1,10 +1,8 @@
 package dev.jeasync.mixin.collect;
 
 import dev.jeasync.AnvilEnchantCache;
-import dev.jeasync.AsyncConfig;
 import dev.jeasync.MixinApplied;
 import dev.jeasync.PlainStacks;
-import dev.jeasync.mixin.nbt.ItemStackTagAccess;
 import mezz.jei.api.recipe.vanilla.IJeiGrindstoneRecipe;
 import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.common.platform.IPlatformRecipeHelper;
@@ -14,13 +12,11 @@ import mezz.jei.library.plugins.vanilla.grindstone.GrindstoneRecipeMaker;
 import mezz.jei.library.util.ResourceLocationUtil;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.Registries;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.inventory.GrindstoneMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.enchantment.Enchantment;
-import net.minecraft.world.item.enchantment.EnchantmentCategory;
 import org.apache.logging.log4j.LogManager;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
@@ -30,30 +26,19 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
 
 import java.util.ArrayList;
-import java.util.IdentityHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Stream;
 
 /**
- * Builds the same grindstone disenchant recipes without a stack per item per enchantment, and
- * without a compound per item per recipe.
+ * Gives the grindstone the same shape the anvil has: keep the real recipes, drop only the
+ * redundant copies.
  * <p>
- * Every enchanted stack for one enchantment at one level carries the identical
- * {@code Enchantments} compound, so the scan builds that compound once and hands every stage of
- * the level's inputs a reference to it. Repair and output stacks carry no compound at all: an
- * undamaged damageable stack reads {@code Damage} as 0 without one. The heap had counted one
- * compound per built stack, tens of millions in a modded pack.
- * <p>
- * One recipe per (enchantment, item, level, up to 10) was the other half of the cost. Since JEI
- * protects the enchantment checks against mod crashes, that full cross product is now always
- * built, where an exception used to cut the scan short. {@code grindstoneDisenchantLevels} caps
- * the level axis: levels above 1 repeat the same inputs and the same plain-item result. The
- * level-1 recipes keep upstream's uids, so the recipes that stay are the same ones JEI had.
- * <p>
- * The repair recipes are skipped by default ({@code skipGrindstoneRepairRecipes}); they are the small
- * vanilla-style two-slot pairs, and with disenchant and repair both off the category is empty and
- * hides itself.
+ * The repair scan is one cheap pair per repairable item, the same kind of list the anvil keeps, so
+ * every pair is built once without the grindstone menu. The disenchant scan is JEI's item ×
+ * enchantment × level cross product; the item copies of one enchantment are redundant (JEI's uid
+ * already collapses on enchantment and level), so the scan keeps one level-1 recipe per real
+ * enchantment instead of the full product. Neither scan is gated by config, so the category always
+ * holds its recipes and never hides itself.
  * <p>
  * Targets upstream 15.74.0.227 and 15.74.0.228 (class unchanged between them).
  */
@@ -61,29 +46,6 @@ import java.util.stream.Stream;
 public class GrindstoneRecipeMakerMixin {
 	@Unique
 	private static volatile boolean jeasync$marked;
-
-	@Unique
-	private static volatile boolean jeasync$markedLevels;
-
-	@Unique
-	private static volatile boolean jeasync$markedRepair;
-
-	@Unique
-	private static final ClassValue<Boolean> jeasync$enchantUsesCategory = new ClassValue<>() {
-		@Override
-		protected Boolean computeValue(Class<?> type) {
-			return jeasync$declarer(type, "canEnchant", ItemStack.class) == Enchantment.class
-				&& jeasync$declarer(type, "canApplyAtEnchantingTable", ItemStack.class) == Enchantment.class;
-		}
-	};
-
-	@Unique
-	private static final ClassValue<Boolean> jeasync$itemUsesCategory = new ClassValue<>() {
-		@Override
-		protected Boolean computeValue(Class<?> type) {
-			return jeasync$declarer(type, "canApplyAtEnchantingTable", ItemStack.class, Enchantment.class) == null;
-		}
-	};
 
 	@Shadow
 	private static boolean canEnchant(
@@ -129,132 +91,56 @@ public class GrindstoneRecipeMakerMixin {
 
 	/**
 	 * @author Mysticpasta1
-	 * @reason The disenchant scan asked the grindstone menu for every item and every level. Enchantments that still use the category test share that answer, and every level shows the same plain stack. One enchantment compound per level is shared by every stack of that level, instead of one compound per stack. The level axis is capped by config: with the crash protection in, JEI builds the full cross product where an exception used to stop the scan early.
+	 * @reason The disenchant scan paired every item with every enchantment and level, but the item
+	 * copies of one enchantment are what JEI's uid already collapses. Keep one recipe per real
+	 * enchantment (level 1, first item that takes it) and drop only those redundant item copies.
 	 */
 	@Overwrite
 	private static Stream<IJeiGrindstoneRecipe> getDisenchantRecipes(
 		IPlatformRecipeHelper platformHelper,
 		GrindstoneMenu grindstoneMenu
 	) {
-		int levelCap = AsyncConfig.grindstoneDisenchantLevels();
-		jeasync$markLevels(levelCap);
-		if (levelCap == 0) {
+		if (platformHelper == null || grindstoneMenu == null) {
 			return Stream.empty();
 		}
 		Registry<Enchantment> enchantmentRegistry = RegistryUtil.getRegistry(Registries.ENCHANTMENT);
 		Registry<Item> itemRegistry = RegistryUtil.getRegistry(Registries.ITEM);
-		List<Enchantment> enchantments = enchantmentRegistry.stream().toList();
-		List<ItemStack> enchantable = new ArrayList<>();
-		for (Item item : itemRegistry) {
-			ItemStack stack = new ItemStack(item);
-			if (stack.isEnchantable()) {
-				enchantable.add(stack);
-			}
-		}
-		boolean[] usesCategory = new boolean[enchantable.size()];
-		for (int i = 0; i < enchantable.size(); i++) {
-			usesCategory[i] = jeasync$itemUsesCategory.get(enchantable.get(i).getItem().getClass());
-		}
-		Map<EnchantmentCategory, boolean[]> categoryMasks = new IdentityHashMap<>();
-
-		List<IJeiGrindstoneRecipe> grindstoneRecipes = new ArrayList<>();
-		for (Enchantment enchantment : enchantments) {
-			if (enchantment.isCurse()) {
+		List<IJeiGrindstoneRecipe> recipes = new ArrayList<>();
+		for (Enchantment enchantment : enchantmentRegistry) {
+			if (enchantment.isCurse() || enchantment.getMaxLevel() < 1) {
 				continue;
 			}
 			ResourceLocation enchantmentId = enchantmentRegistry.getKey(enchantment);
-			boolean enchantUsesCategory = jeasync$enchantUsesCategory.get(enchantment.getClass());
-			boolean[] mask = enchantUsesCategory && enchantment.category != null
-				? jeasync$categoryMask(enchantment.category, enchantable, usesCategory, categoryMasks)
-				: null;
-			List<ItemStack> supportedItems = new ArrayList<>();
-			for (int i = 0; i < enchantable.size(); i++) {
-				ItemStack stack = enchantable.get(i);
-				boolean supported;
-				if (mask != null && usesCategory[i]) {
-					supported = mask[i];
-				} else {
-					supported = canEnchant(platformHelper, stack, enchantment, enchantmentId);
+			for (Item item : itemRegistry) {
+				ItemStack plain = new ItemStack(item);
+				if (!plain.isEnchantable()) {
+					continue;
 				}
-				if (supported) {
-					supportedItems.add(stack);
+				if (!canEnchant(platformHelper, plain, enchantment, enchantmentId)) {
+					continue;
 				}
-			}
-			int limit = levelCap < 0 ? 10 : levelCap;
-			int levels = Math.min(enchantment.getMaxLevel(), limit);
-			if (levels < 1 || supportedItems.isEmpty()) {
-				continue;
-			}
-
-			List<ItemStack> bottomInputs = new ArrayList<>(supportedItems.size());
-			for (int i = 0; i < supportedItems.size(); i++) {
-				bottomInputs.add(ItemStack.EMPTY);
-			}
-			for (int level = 1; level <= levels; level++) {
-				ItemStack enchantedStack = supportedItems.get(0).copy();
-				enchantedStack.enchant(enchantment, level);
-				CompoundTag sharedTag = ((ItemStackTagAccess) (Object) enchantedStack).jeasync$getTag();
-				List<ItemStack> topInputs = new ArrayList<>(supportedItems.size());
-				topInputs.add(enchantedStack);
-				for (int i = 1; i < supportedItems.size(); i++) {
-					ItemStack shared = new ItemStack(supportedItems.get(i).getItem());
-					((ItemStackTagAccess) (Object) shared).jeasync$setTag(sharedTag);
-					topInputs.add(shared);
-				}
-				ResourceLocation uid = getDisenchantmentRecipeUid(enchantmentId, level);
-				grindstoneRecipes.add(new GrindstoneRecipe(topInputs, bottomInputs, supportedItems, -1, -1, uid));
+				ItemStack enchanted = plain.copy();
+				enchanted.enchant(enchantment, 1);
+				ResourceLocation uid = getDisenchantmentRecipeUid(enchantmentId, 1);
+				recipes.add(new GrindstoneRecipe(
+					List.of(enchanted),
+					List.of(ItemStack.EMPTY),
+					List.of(plain),
+					-1,
+					-1,
+					uid
+				));
+				break;
 			}
 		}
-		return grindstoneRecipes.stream();
-	}
-
-	@Unique
-	private static boolean[] jeasync$categoryMask(
-		EnchantmentCategory category,
-		List<ItemStack> enchantable,
-		boolean[] usesCategory,
-		Map<EnchantmentCategory, boolean[]> masks
-	) {
-		boolean[] cached = masks.get(category);
-		if (cached != null) {
-			return cached;
-		}
-		boolean[] mask = new boolean[enchantable.size()];
-		for (int i = 0; i < enchantable.size(); i++) {
-			if (!usesCategory[i]) {
-				continue;
-			}
-			try {
-				mask[i] = category.canEnchant(enchantable.get(i).getItem());
-			} catch (RuntimeException exception) {
-				mask[i] = false;
-				LogManager.getLogger(GrindstoneRecipeMakerMixin.class).error(
-					"Failed to check enchantment category {} for {}",
-					category,
-					enchantable.get(i).getItem(),
-					exception
-				);
-			}
-		}
-		masks.put(category, mask);
-		return mask;
-	}
-
-	@Unique
-	private static Class<?> jeasync$declarer(Class<?> type, String name, Class<?>... parameters) {
-		for (Class<?> current = type; current != null && current != Object.class; current = current.getSuperclass()) {
-			try {
-				return current.getDeclaredMethod(name, parameters).getDeclaringClass();
-			} catch (NoSuchMethodException ignored) {
-				// Declared on a superclass, or only as an interface default.
-			}
-		}
-		return null;
+		return recipes.stream();
 	}
 
 	/**
 	 * @author Mysticpasta1
-	 * @reason Repair registration sent every damageable stack through the grindstone menu: one plain item of each kind has the same repaired result, and these recipes are skipped by default under {@code skipGrindstoneRepairRecipes}.
+	 * @reason Repair registration sent every damageable stack through the grindstone menu. The
+	 * list is one cheap pair per repairable item, the same kind the anvil keeps, so build it once
+	 * without the menu and keep every pair instead of collapsing to a single example.
 	 */
 	@Overwrite
 	private static Stream<IJeiGrindstoneRecipe> getRepairRecipes(
@@ -262,10 +148,6 @@ public class GrindstoneRecipeMakerMixin {
 		IIngredientManager ingredientManager,
 		GrindstoneMenu grindstoneMenu
 	) {
-		if (AsyncConfig.skipGrindstoneRepairRecipes()) {
-			jeasync$markRepair();
-			return Stream.empty();
-		}
 		if (platformHelper == null || ingredientManager == null || grindstoneMenu == null) {
 			return Stream.empty();
 		}
@@ -316,44 +198,8 @@ public class GrindstoneRecipeMakerMixin {
 		}
 		jeasync$marked = true;
 		MixinApplied.mark("collect.GrindstoneRecipeMakerMixin");
-		org.apache.logging.log4j.LogManager.getLogger(GrindstoneRecipeMakerMixin.class).info(
-			"jeasync: grindstone disenchant recipes reuse enchant categories and one plain result per level"
-		);
-		org.apache.logging.log4j.LogManager.getLogger(GrindstoneRecipeMakerMixin.class).info(
-			"jeasync: grindstone results are built without the grindstone menu"
-		);
-		org.apache.logging.log4j.LogManager.getLogger(GrindstoneRecipeMakerMixin.class).info(
-			"jeasync: grindstone enchanted stacks share one compound per enchantment level"
-		);
-	}
-
-	@Unique
-	private static void jeasync$markLevels(int levelCap) {
-		if (jeasync$markedLevels || levelCap < 0) {
-			return;
-		}
-		jeasync$markedLevels = true;
-		MixinApplied.mark("collect.GrindstoneRecipeMakerMixin");
-		if (levelCap == 0) {
-			org.apache.logging.log4j.LogManager.getLogger(GrindstoneRecipeMakerMixin.class).info(
-				"jeasync: grindstone disenchant recipes are not built"
-			);
-			return;
-		}
-		org.apache.logging.log4j.LogManager.getLogger(GrindstoneRecipeMakerMixin.class).info(
-			"jeasync: grindstone disenchant recipes build {} level(s) per enchantment instead of 10", levelCap
-		);
-	}
-
-	@Unique
-	private static void jeasync$markRepair() {
-		if (jeasync$markedRepair) {
-			return;
-		}
-		jeasync$markedRepair = true;
-		MixinApplied.mark("collect.GrindstoneRecipeMakerMixin");
-		org.apache.logging.log4j.LogManager.getLogger(GrindstoneRecipeMakerMixin.class).info(
-			"jeasync: grindstone repair recipes are not built"
+		LogManager.getLogger(GrindstoneRecipeMakerMixin.class).info(
+			"jeasync: grindstone reuses enchant categories during its scan"
 		);
 	}
 }

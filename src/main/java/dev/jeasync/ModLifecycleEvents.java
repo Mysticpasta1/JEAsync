@@ -39,9 +39,11 @@ final class ModLifecycleEvents {
 				return;
 			}
 			LOGGER.info(
-				"[async-diag] effective settings: threads={} recipeRowCapacity={}",
+				"[async-diag] effective settings: threads={} skippedRecipeSerializers={} dedupRecipeSerializers={} skippedCategories={}",
 				AsyncConfig.getThreadCount(),
-				AsyncConfig.getRecipeRowCapacity());
+				AsyncConfig.skippedRecipeSerializers(),
+				AsyncConfig.dedupRecipeSerializers(),
+				AsyncConfig.skippedCategories());
 		}
 	}
 

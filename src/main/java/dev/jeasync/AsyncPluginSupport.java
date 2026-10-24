@@ -18,8 +18,9 @@ import java.util.concurrent.TimeUnit;
  * <p>
  * Every plugin is dispatched, vanilla included. One can stay on the calling thread by implementing
  * {@link dev.jeasync.api.IAsyncCompatiblePlugin} and returning false from {@code canExecuteAsync()}.
- * A plugin that throws off-thread is recorded here and kept on the calling thread for the rest
- * of the session. The caller decides which of those failures are safe to run a second time.
+ * A plugin that throws off-thread is recorded here and kept out of the worker pool for the rest
+ * of the session. The caller decides which of those failures are safe to run a second time, and
+ * re-runs them on the client thread.
  */
 public final class AsyncPluginSupport {
     private static final Logger LOGGER = LogManager.getLogger();
@@ -119,7 +120,7 @@ public final class AsyncPluginSupport {
     /**
      * Whether this plugin's registration callback may run on a worker.
      * <p>
-     * A plugin already recorded as incompatible stays on the calling thread. That check comes
+     * A plugin already recorded as incompatible stays out of the worker pool. That check comes
      * first so a plugin that failed once is not dispatched again. Vanilla is included: upstream
      * still treats a vanilla failure as fatal, which {@code PluginCaller} preserves on the retry.
      */
@@ -142,7 +143,7 @@ public final class AsyncPluginSupport {
      */
     public static void markIncompatible(IModPlugin plugin, String phase) {
         if (INCOMPATIBLE.add(plugin)) {
-            LOGGER.warn("Plugin {} failed off the main thread during {} ({}); it will run inline from now on.",
+            LOGGER.warn("Plugin {} failed off the main thread during {} ({}); it will not be dispatched off-thread again.",
                     plugin.getPluginUid(), phase, plugin.getClass().getName());
         }
     }

@@ -15,7 +15,8 @@ import net.minecraft.resources.ResourceLocation;
  * synthetic plugin: it is the same signal, produced without the crash.
  * <p>
  * Expected log output: an error from the off-thread attempt, then "Re-running 1 plugin(s) on the
- * calling thread", then this plugin running inline in every later phase with no further attempts.
+ * client thread", then this plugin running on the client thread in every later phase with no
+ * further attempts.
  */
 @JeiPlugin
 public class OffThreadUnsafePlugin implements mezz.jei.api.IModPlugin {

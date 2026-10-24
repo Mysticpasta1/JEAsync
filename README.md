@@ -15,7 +15,7 @@ patches it at runtime with mixins.
 ## Performance, measured
 
 **Every plugin is dispatched off the main thread.** There is no opt-in step. A plugin that throws
-is demoted to the calling thread. A client-queue failure is re-run once on the client thread.
+is demoted and re-run on the client thread.
 The stock-modpack case is the fast case.
 
 **The table below is a historical measurement**, taken against JEI 15.71 when the off switches
@@ -172,12 +172,14 @@ after another.
 Thread-safety is discovered by running the plugin and watching, not by asking it first:
 
 1. Every plugin is dispatched to a worker.
-2. If the callback throws, the plugin is recorded as incompatible. A client-queue failure is
-   re-run once on the client thread after the workers finish. A missing class, or a registration
-   rejected because that id is already present, stays as the error from the attempt that threw.
-   Any other failure is re-run once on the calling thread. Plugins demoted by an earlier phase
-   already ran on the calling thread in this phase, so they are not re-run again at the end.
-3. An incompatible plugin stays on the calling thread for later phases. This applies to
+2. If the callback throws, the plugin is recorded as incompatible. A missing class, or a
+   registration rejected because that id is already present, stays as the error from the attempt
+   that threw. Any other failure is re-run once, on the client thread, after the workers finish.
+   That is the thread JEI itself would have used; the startup worker is still off the render
+   thread, so a plugin that needed it used to fail there a second time. Plugins demoted by an
+   earlier phase already ran on the client thread in this phase, so they are not re-run again at
+   the end.
+3. An incompatible plugin runs on the client thread for later phases. This applies to
    `VanillaPlugin` too.
 
 Vanilla is dispatched with everyone else. Upstream still treats a vanilla failure as fatal, and the
@@ -268,44 +270,75 @@ crash protection is the intended behaviour, there is nothing upstream to roll ba
 
 jeasync removes the two axes that multiplied without adding information:
 
-- **Level.** A disenchant recipe exists per (enchantment, item, level). Levels above 1 repeat the
-  same enchanted input and the same plain-item result, so `grindstoneDisenchantLevels` caps the
-  level axis: `0` (the default) skips the disenchant recipes entirely, `1` keeps one recipe per
-  enchantment, and `-1` restores JEI's full cross product. Recipes that are kept carry JEI's own
-  uids, so a lower cap is JEI's recipe list with its tail removed. JEI log-spamming the failed
-  enchantment check ("Failed to check if enchantment {X} can be applied to item {Y}") still names
-  the mod whose enchantment started all of this: that enchantment does not fit the items it is
-  being tested against.
+- **Level and item.** A disenchant recipe exists per (enchantment, item, level). The extra items
+  and levels above the first repeat the same result, so the grindstone now always keeps one recipe
+  per enchantment - JEI's own uid, its first level, the first item that takes it - and drops only
+  those redundant item and level copies. JEI log-spamming the failed enchantment check ("Failed to
+  check if enchantment {X} can be applied to item {Y}") still names the mod whose enchantment
+  started all of this: that enchantment does not fit the items it is being tested against.
 - **Stack contents.** The enchanted stacks of one enchantment level share a single
   `Enchantments` compound instead of one per stack, and the outputs are the plain shared stacks
   rather than fresh grindstone-menu results. The heap cost of the stacks is now shared where it
   can be and counted once where it cannot.
 - **Enchanting and repairing.** The anvil book-enchantment scan is the same cross product one
-  shelf over: every registered ingredient paired with every enchantment and level. The repair
-  recipes, anvil and grindstone, are small fixed vanilla pairs, but they feed categories that are
-  empty once disenchant and book-enchanting are off. All three skip by default:
-  `skipAnvilEnchantRecipes`, `skipAnvilRepairRecipes` and `skipGrindstoneRepairRecipes`. Flip one to
-  `false` and its recipes are built again; a category whose registrations are all skipped hides
-  itself.
+  shelf over: every registered ingredient paired with every enchantment and level. `skipAnvilEnchantRecipes`
+  (default `true`) skips it, and `skipAnvilRepairRecipes` controls the anvil's small fixed repair
+  list; with both off the anvil category hides itself. The grindstone does the opposite of hiding:
+  it always keeps its repair pairs, one per repairable item, beside the one disenchant recipe per
+  enchantment, so it shows real recipes like an anvil that keeps its repairs rather than blanking
+  out.
+- **Mod plugins that write the same lists.** Iron's Spells' arcane anvil plugin runs the same
+  machinery one mod over: spell merges one per spell level, imbue pairs, an upgrade × upgradeable
+  cross product, and attune recipes, keyed to every registered item (120k-plus in a large pack).
+  That list is replaced before it is built with one recipe of each type - scroll upgrade, imbue,
+  item upgrade, and affinity attune - so the category shows its real recipe types without the cross
+  product.
+- **The generic lever.** Plugins that hand JEI synthetic recipe objects carry no vanilla
+  serializer for `skippedRecipeSerializers` to match, so `skippedCategories` drops a whole
+  registration call by recipe category uid instead
+  (`truedarkness:cursed_anvil_recipe_type`, `embers:dawnstone_anvil`, and so on in this pack).
+  The plugin still pays its own generation cost; the rows, focus links and catalysts are never
+  built. Default empty.
+- **The empty rows.** Some plugins register recipes that carry no ingredients in any role — every
+  ingredient they handed to the layout was air or nothing, and air does not exist as an ingredient
+  in JEI, so the row shows an empty picture no click can look up with.
+  `filterEmptyRecipes` (default `true`) drops those at registration, once each category is named
+  in the log with the first row it dropped. A recipe with an empty output role is kept when it
+  still has an input or catalyst, because that role may hold fluids or a slot the category draws
+  itself; recipes that declare no output slot at all (fueling, compost, ingredient info) keep
+  theirs too.
 
 ### Recipes can be dropped at registration
 
 `skippedRecipeSerializers` lists recipe serializers whose JEI recipes are dropped at registration:
 no rows, no focus links, no ingredient suppliers. The match is on the registry name of the
 underlying vanilla recipe's serializer, and only recipes that *are* vanilla `Recipe` objects can
-match, so purely synthetic JEI recipes and add-on wrappers pass through untouched.
+match, so purely synthetic JEI recipes and add-on wrappers pass through untouched. Reading that
+serializer is guarded: JEI's own `JeiShapedRecipe` resolves a deferred registry entry, and some mod
+recipes compute theirs from their own state, so either can fail while registration is still running
+off the render thread. A recipe that cannot answer its serializer registers unfiltered rather than
+aborting the plugin that owns it.
 
-The default entry is `tconstruct:tipped_tool_transform`. Tinkers' Construct's tipped-tool table
-(`TippedToolTransformRecipe`) is a datapack recipe, and packs and add-ons write one per tool
-layout they cover, so a modded pack carries dozens to hundreds of them, and every one registers
-now that JEI protects the checks from failing. A category left with no visible recipes hides
+The default for `dedupRecipeSerializers` is `tconstruct:tipped_tool_transform`. Tinkers' Construct's
+tipped-tool table (`TippedToolTransformRecipe`) is a datapack recipe, and packs and add-ons write one
+per tool layout they cover, so a modded pack carries dozens to hundreds of them, and every one
+registers now that JEI protects the checks from failing.
+
+### Recipes can be collapsed to one per effect
+
+`dedupRecipeSerializers` keeps a serializer's recipes but registers only the first of each distinct
+effect. The effect is read reflectively: whichever modifier-, enchantment- or affix-typed field the
+recipe class declares. Tinkers' tipped-tool transforms collapse to one recipe per tipped modifier
+by default; adding an Apothic or Apotheosis affix serializer id collapses its affix recipes to one
+per affix the same way. A recipe whose effect field cannot be read stays distinct, and only vanilla
+`Recipe` objects are matched — synthetic add-on recipes pass through untouched. A category left with no visible recipes hides
 itself, so nothing dropped leaves an empty category behind.
 
 ### Focus links are deferred until a recipe is first queried
 
 `deferFocusLinks = true` (default) keeps JEI from storing the per-slot ingredient lists at
 registration. They are built on a recipe's first visibility query and cached then, so a recipe
-that is never queried holds nothing. The grindstone cap and the deferral hit the same heap:
+that is never queried holds nothing. The grindstone dedup and the deferral hit the same heap:
 one fewer list per recipe that never gets looked at.
 
 ### Search strings are written to the index in batches
@@ -319,19 +352,19 @@ once at the end.
 ## Configuration
 
 `config/jeasync-client.toml`, written on first launch. Registration itself is not a setting.
-Every plugin runs off the render thread. The file has the thread count, the memory levers and a
-legacy capacity key, and each comment in the file says what it does.
+Every plugin runs off the render thread. The file has the thread count and the memory levers, and
+each comment in the file says what it does.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `threads` | `0` | Worker pool size. `0` uses the processor count, and at least 2 |
 | `deferFocusLinks` | `true` | Build each recipe's focus links at its first visibility query instead of at registration. Unqueried recipes hold nothing |
-| `grindstoneDisenchantLevels` | `0` | Cap on the levels registered for JEI's grindstone disenchant recipes. `0` skips them, `-1` keeps JEI's full cross product. See [The grindstone memory explosion](#the-grindstone-memory-explosion) |
-| `skipGrindstoneRepairRecipes` | `true` | Skip the small grindstone repair-recipe pair list |
-| `skipAnvilEnchantRecipes` | `true` | Skip JEI's anvil book-enchantment recipes, the ingredient x enchantment x level cross product |
-| `skipAnvilRepairRecipes` | `true` | Skip the small anvil repair-recipe list |
-| `skippedRecipeSerializers` | `tconstruct:tipped_tool_transform` | Recipe serializer ids dropped from registration entirely. See [Recipes can be dropped at registration](#recipes-can-be-dropped-at-registration) |
-| `recipeRowCapacity` | `512` | Initial capacity of each per-ingredient recipe row. `1` keeps JEI's size. Not applied; kept so old config files load |
+| `skipAnvilEnchantRecipes` | `true` | Skip JEI's anvil book-enchantment recipes, the ingredient x enchantment x level cross product. See [The grindstone memory explosion](#the-grindstone-memory-explosion) |
+| `skipAnvilRepairRecipes` | `true` | Skip the small anvil repair-recipe list. The anvil keeps it when this is off |
+| `filterEmptyRecipes` | `true` | Drop recipes that register with no ingredients in any role |
+| `skippedRecipeSerializers` | *(empty)* | Recipe serializer ids dropped from registration entirely. See [Recipes can be dropped at registration](#recipes-can-be-dropped-at-registration) |
+| `dedupRecipeSerializers` | `tconstruct:tipped_tool_transform` | Recipe serializer ids kept but collapsed to one recipe per effect. See [Recipes can be collapsed to one per effect](#recipes-can-be-collapsed-to-one-per-effect) |
+| `skippedCategories` | *(empty)* | JEI recipe category ids whose whole registration call is dropped, for synthetic mod-plugin recipes no serializer can name |
 
 Client-side rather than common: these govern how this client builds its indexes. Nothing here
 changes world state, so a dedicated server ignores the file.
@@ -344,12 +377,12 @@ A `-Djeasync.*` property wins over the file:
 | --- | --- |
 | `-Djeasync.threads=N` | `threads` |
 | `-Djeasync.deferFocusLinks=true/false` | `deferFocusLinks` |
-| `-Djeasync.grindstoneDisenchantLevels=N` | `grindstoneDisenchantLevels` |
-| `-Djeasync.skipGrindstoneRepairRecipes=true/false` | `skipGrindstoneRepairRecipes` |
 | `-Djeasync.skipAnvilEnchantRecipes=true/false` | `skipAnvilEnchantRecipes` |
 | `-Djeasync.skipAnvilRepairRecipes=true/false` | `skipAnvilRepairRecipes` |
+| `-Djeasync.filterEmptyRecipes=true/false` | `filterEmptyRecipes` |
 | `-Djeasync.skippedRecipeSerializers=id[,id...]` | `skippedRecipeSerializers` |
-| `-Djeasync.recipeRowCapacity=N` | `recipeRowCapacity` |
+| `-Djeasync.dedupRecipeSerializers=id[,id...]` | `dedupRecipeSerializers` |
+| `-Djeasync.skippedCategories=id[,id...]` | `skippedCategories` |
 
 The effective values are logged at startup as `[async-diag] effective settings: ...`.
 
@@ -420,7 +453,7 @@ is considerably easier to diagnose than a later crash during gameplay.
   without throwing is not detectable, so the failure mode is missing recipes with no error logged.
 - **A plugin that throws partway through has already published what it registered.** A duplicate
   id or a missing class is not run again in that phase, so the partial work stays as the first
-  attempt left it. Later phases for that plugin run on the calling thread. Any other failure is
+  attempt left it. Later phases for that plugin run on the client thread. Any other failure is
   still run a second time, and a callback that is not idempotent can register twice.
 - **Applying a mixin is not the same as it being correct.** The locks are derived from reading
   upstream source; a race that only manifests under genuine parallel load will not show up in a

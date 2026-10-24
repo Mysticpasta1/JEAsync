@@ -161,7 +161,7 @@ tasks.register('deployBenchmarkJarServer', Copy) {
     into layout.projectDirectory.dir('run/server/mods')
 }
 
-def forwardedProperties = ['jeasync.threads', 'jeasync.recipeRowCapacity', 'loadtest.workMs', 'loadtest.ingredients', 'loadtest.ingredientBlocks']
+def forwardedProperties = ['jeasync.threads', 'loadtest.workMs', 'loadtest.ingredients', 'loadtest.ingredientBlocks']
 
 minecraft {
     runs {

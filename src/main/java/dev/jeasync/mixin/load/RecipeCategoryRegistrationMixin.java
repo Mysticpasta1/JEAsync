@@ -39,7 +39,10 @@ public abstract class RecipeCategoryRegistrationMixin {
 	 * @author Mysticpasta1
 	 * @reason Register categories under one lock so parallel plugins keep every category and its type uid.
 	 */
+	// The target is varargs. ACC_VARARGS shares the 0x0080 bit with ACC_TRANSIENT, so the
+	// Minecraft Dev inspection misreads the flag and asks for a 'transient' method.
 	@Overwrite
+	@SuppressWarnings("OverwriteModifiers")
 	public void addRecipeCategories(IRecipeCategory<?>... recipeCategories) {
 		dev.jeasync.MixinApplied.mark("load.RecipeCategoryRegistrationMixin");
 		ErrorUtil.checkNotEmpty(recipeCategories, "recipeCategories");
