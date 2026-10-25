@@ -1,0 +1,13 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "dev.jeasync.mixin.compat",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "jeasync.refmap.json",
+  "mixins": [
+    "ConfigManagerAdapterMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -47,6 +47,9 @@ final class MixinSelfCheck {
 		"net.minecraft.world.item.CreativeModeTab",
 		"mezz.jei.forge.platform.ModHelper",
 		"mezz.jei.common.ingredients.itemStacks.TypedItemStack",
+		// The config adapter's nested file record, named by its binary name because it is nested.
+		// Common code, so this loads on a server as well as a client.
+		"mezz.jei.common.config.ConfigManagerAdapter$ConfigFile",
 		// Not a JEI class: this is the client event loop the guard mixin patches, so a rename
 		// there would silently disable the guard rather than fail anything else.
 		"net.minecraft.util.thread.BlockableEventLoop"

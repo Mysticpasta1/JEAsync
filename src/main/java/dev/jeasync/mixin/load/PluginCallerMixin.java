@@ -71,6 +71,13 @@ import java.util.function.Consumer;
  * already stored, vanilla and modded. Any phase that arrives before the item registry is frozen
  * stays on the calling thread. Later phases still use the pool.
  * <p>
+ * That phase hands out the adapter over the config library's schemas, and none of them name a
+ * file until a world exists for them to resolve against, so the adapter throws for an inactive
+ * schema until then. A config reader outside JEI takes that as a crash, which
+ * {@link dev.jeasync.mixin.compat.ConfigManagerAdapterMixin} answers by naming the schema's own
+ * file. Distributing the adapter is not where that state is decided, so the phase's threading
+ * stays as above.
+ * <p>
  * Targets upstream 15.71.0.224.
  */
 @Mixin(value = mezz.jei.library.load.PluginCaller.class, remap = false, priority = 0)
