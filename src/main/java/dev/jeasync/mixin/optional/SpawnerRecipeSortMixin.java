@@ -47,7 +47,9 @@ public abstract class SpawnerRecipeSortMixin {
 		remap = false,
 		require = 0
 	)
-	private static void jeasync$sortRecipesByOffhand(List<?> recipes, Comparator<Object> modComparator) {
+	// registerRecipes is an instance method, so Mixin requires this handler to be non-static:
+	// the enclosing SpawnerJEIPlugin instance arrives as the redirect's first argument.
+	private void jeasync$sortRecipesByOffhand(List<?> recipes, Comparator<Object> modComparator) {
 		Method getter = recipes.isEmpty() ? null : jeasync$findOffhandInput(recipes.get(0).getClass());
 		if (getter == null) {
 			recipes.sort(modComparator);
