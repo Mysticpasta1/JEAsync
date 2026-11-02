@@ -10,7 +10,10 @@ import mezz.jei.modshade.org.apache.lucene.document.NumericDocValuesField;
 import mezz.jei.modshade.org.apache.lucene.document.StringField;
 import mezz.jei.modshade.org.apache.lucene.index.IndexWriter;
 import mezz.jei.modshade.org.apache.lucene.index.IndexWriterConfig;
-import mezz.jei.modshade.org.apache.lucene.index.SerialMergeScheduler;
+import mezz.jei.modshade.org.apache.lucene.index.LiveIndexWriterConfig;
+import mezz.jei.modshade.org.apache.lucene.index.MergePolicy;
+import mezz.jei.modshade.org.apache.lucene.index.MergeScheduler;
+import mezz.jei.modshade.org.apache.lucene.index.MergeTrigger;
 import mezz.jei.modshade.org.apache.lucene.index.TieredMergePolicy;
 import mezz.jei.modshade.org.apache.lucene.store.Directory;
 import org.apache.logging.log4j.LogManager;
@@ -24,8 +27,6 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
@@ -46,7 +47,8 @@ import java.util.ArrayList;
  * {@code refresh} and {@code removeAll} still do the final reader open and the deletes; they need
  * this writer closed first because the directory allows one writer.
  * <p>
- * Targets upstream 15.74.0.225.
+ * Targets upstream 15.74.0.233.
+ * The published jar no longer shades {@code SerialMergeScheduler}; merges run inline instead.
  */
 @Mixin(value = LuceneSearchStorage.class, remap = false)
 public abstract class LuceneSearchStorageMixin {
@@ -167,9 +169,6 @@ public abstract class LuceneSearchStorageMixin {
 					document.add(new IntPoint(VALUE_FIELD, valueId));
 					writer.addDocument(document);
 				}
-			} catch (IOException e) {
-				this.jeasync$abandonWriter(e);
-				throw new UncheckedIOException(e);
 			} catch (RuntimeException e) {
 				this.jeasync$abandonWriter(e);
 				throw e;
@@ -193,19 +192,8 @@ public abstract class LuceneSearchStorageMixin {
 		if (writer != null) {
 			return writer;
 		}
-		TieredMergePolicy policy = new TieredMergePolicy();
-		// Default max merged segment is 5GB, which copies a finished index again while strings are still live.
-		policy.setMaxMergedSegmentMB(32);
-		policy.setMaxMergeAtOnce(4);
-		IndexWriterConfig config = new IndexWriterConfig(ANALYZER);
-		config.setRAMBufferSizeMB(8);
-		config.setMergePolicy(policy);
-		config.setMergeScheduler(new SerialMergeScheduler());
-		try {
-			writer = new IndexWriter(this.directory, config);
-		} catch (IOException e) {
-			throw new UncheckedIOException(e);
-		}
+		IndexWriterConfig config = jeasync$writerConfig();
+		writer = new IndexWriter(this.directory, config);
 		this.jeasync$writer = writer;
 		return writer;
 	}
@@ -222,11 +210,7 @@ public abstract class LuceneSearchStorageMixin {
 				return;
 			}
 			this.jeasync$writer = null;
-			try {
-				writer.close();
-			} catch (IOException e) {
-				throw new UncheckedIOException(e);
-			}
+			writer.close();
 			this.readerDirty = true;
 		}
 	}
@@ -244,7 +228,7 @@ public abstract class LuceneSearchStorageMixin {
 		}
 		try {
 			writer.close();
-		} catch (IOException closeFailure) {
+		} catch (RuntimeException closeFailure) {
 			failure.addSuppressed(closeFailure);
 		}
 		this.readerDirty = true;
@@ -282,6 +266,54 @@ public abstract class LuceneSearchStorageMixin {
 	 * @author Mysticpasta1
 	 * @reason The pending entry type is a private record. Read it from the merged class, and fall back if that lookup is refused.
 	 */
+	/**
+	 * JEI's shaded Lucene keeps the config fields and strips the public setters.
+	 */
+	@Unique
+	private static IndexWriterConfig jeasync$writerConfig() {
+		IndexWriterConfig config = new IndexWriterConfig(ANALYZER);
+		TieredMergePolicy policy = new TieredMergePolicy();
+		try {
+			// Default max merged segment is 5GB, which copies a finished index again while strings are still live.
+			java.lang.reflect.Field maxMerged = TieredMergePolicy.class.getDeclaredField("maxMergedSegmentBytes");
+			maxMerged.setAccessible(true);
+			maxMerged.setLong(policy, 32L * 1024 * 1024);
+			java.lang.reflect.Field maxAtOnce = TieredMergePolicy.class.getDeclaredField("maxMergeAtOnce");
+			maxAtOnce.setAccessible(true);
+			maxAtOnce.setInt(policy, 4);
+			java.lang.reflect.Field mergePolicy = LiveIndexWriterConfig.class.getDeclaredField("mergePolicy");
+			mergePolicy.setAccessible(true);
+			mergePolicy.set(config, policy);
+			java.lang.reflect.Field ram = LiveIndexWriterConfig.class.getDeclaredField("ramBufferSizeMB");
+			ram.setAccessible(true);
+			ram.setDouble(config, 8);
+			java.lang.reflect.Field scheduler = LiveIndexWriterConfig.class.getDeclaredField("mergeScheduler");
+			scheduler.setAccessible(true);
+			scheduler.set(config, new InlineMergeScheduler());
+		} catch (ReflectiveOperationException e) {
+			throw new IllegalStateException("jeasync: cannot configure the search index writer", e);
+		}
+		return config;
+	}
+
+	/**
+	 * Same contract as Lucene's {@code SerialMergeScheduler}, which JEI 15.74.0.233 no longer shades.
+	 */
+	private static final class InlineMergeScheduler extends MergeScheduler {
+		@Override
+		public synchronized void merge(MergeSource mergeSource, MergeTrigger trigger) {
+			MergePolicy.OneMerge merge;
+			while ((merge = mergeSource.getNextMerge()) != null) {
+				mergeSource.merge(merge);
+			}
+		}
+
+		@Override
+		public Directory wrapForMerge(MergePolicy.OneMerge merge, Directory in) {
+			return in;
+		}
+	}
+
 	@Unique
 	private static void jeasync$bind(Object entry) {
 		if (jeasync$keyCall != null || jeasync$keyReflect != null) {
