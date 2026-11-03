@@ -52,10 +52,6 @@ import java.util.function.Consumer;
  * Anything that cannot run on a worker is held until that phase's workers have joined, then run
  * on the client thread, in the order the plugins were listed. That is a plugin that opted out of
  * async, a plugin already demoted, and a plugin that has to see the other plugins' results.
- * {@code VanillaPlugin} is the exception during ingredient registration: it publishes
- * {@code item_stack} and the fluid type, those ids can be taken only once, and its failure aborts
- * startup. It runs on the client thread before the pool starts, which is upstream's order. A
- * plugin that races it and registers the same id fails on its own and is skipped.
  * {@code tconstruct:jei_plugin} is the last of those: its melting-fuel scan walks every item, and
  * its runtime callback adds and removes ingredients, so it runs without the stuck-plugin timer.
  * Avaritia and its addons do the same wait: they copy the client recipe manager, and that copy
@@ -129,50 +125,14 @@ public abstract class PluginCallerMixin {
 		JeiLoadProgress.beginStage(title, plugins.size());
 
 		List<CompletableFuture<Void>> pending = new ArrayList<>();
-		List<IModPlugin> leading = new ArrayList<>();
 		List<IModPlugin> inline = new ArrayList<>();
 		List<IModPlugin> retry = Collections.synchronizedList(new ArrayList<>());
 
 		for (IModPlugin plugin : plugins) {
-			if (registersCoreIngredientTypes(title, plugin)) {
-				leading.add(plugin);
-			} else if (needsInline(plugin)) {
+			if (needsInline(plugin)) {
 				inline.add(plugin);
 			} else {
 				pending.add(dispatchAsync(title, plugin, func, retry));
-			}
-		}
-
-		// Vanilla's item and fluid types have to exist before any other plugin registers. Running
-		// it with the pool lets another plugin take item_stack first. The retry then runs vanilla
-		// again, finds its own type, and aborts startup. This pass joins before the pool starts.
-		// The worker still builds the item list. The client thread is only used when vanilla has
-		// already been demoted, or when that worker attempt has to be repeated.
-		if (!leading.isEmpty()) {
-			List<CompletableFuture<Void>> leadFutures = new ArrayList<>();
-			List<IModPlugin> leadRetry = Collections.synchronizedList(new ArrayList<>());
-			List<IModPlugin> leadInline = new ArrayList<>();
-			for (IModPlugin plugin : leading) {
-				if (AsyncPluginSupport.isAsyncCapable(plugin)) {
-					leadFutures.add(dispatchAsync(title, plugin, func, leadRetry));
-				} else {
-					leadInline.add(plugin);
-				}
-			}
-			if (!leadFutures.isEmpty()) {
-				try {
-					CompletableFuture.allOf(leadFutures.toArray(new CompletableFuture[0])).join();
-				} catch (CompletionException e) {
-					JEI_ASYNC_LOGGER.warn("Vanilla ingredient registration failed off-thread (already handled)");
-				}
-				retryFailed(title, leadRetry, func);
-			}
-			if (!leadInline.isEmpty()) {
-				try (PluginCallerTimer timer = new PluginCallerTimer()) {
-					for (IModPlugin plugin : leadInline) {
-						runOnClientThread(plugin, func, title, timer, true);
-					}
-				}
 			}
 		}
 
@@ -213,15 +173,7 @@ public abstract class PluginCallerMixin {
 		if (!failedPlugins.isEmpty()) {
 			JEI_ASYNC_LOGGER.error("jeasync: {} plugin(s) failed during {} and were skipped: {}", failedPlugins.size(), title, failedPlugins);
 		}
-		JEI_ASYNC_LOGGER.info("{} took {} ({} leading, {} inline, {} async)", title, stopwatch, leading.size(), inline.size(), pending.size());
-	}
-
-	/**
-	 * Vanilla publishes the ingredient types every other plugin shares. That phase title is JEI's
-	 * own {@code PluginLoader.registerIngredients} label.
-	 */
-	private static boolean registersCoreIngredientTypes(String title, IModPlugin plugin) {
-		return plugin instanceof VanillaPlugin && "Registering ingredients".equals(title);
+		JEI_ASYNC_LOGGER.info("{} took {} ({} inline, {} async)", title, stopwatch, inline.size(), pending.size());
 	}
 
 	/**
