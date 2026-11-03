@@ -4,7 +4,6 @@ import java.util.List;
 import java.util.Set;
 
 import dev.jeasync.compat.ErrorUtilBridge;
-import dev.jeasync.compat.FluidTankRenderFix;
 import dev.jeasync.compat.JeiRemovedTypeRewrite;
 import dev.jeasync.compat.SearchFieldBridge;
 import net.minecraftforge.fml.loading.FMLEnvironment;
@@ -48,8 +47,6 @@ public final class JeAsyncMixinPlugin implements IMixinConfigPlugin {
 	public void preApply(String targetClassName, ClassNode targetClass, String mixinClassName, IMixinInfo mixinInfo) {
 		ErrorUtilBridge.prepare(targetClass);
 		SearchFieldBridge.prepare(targetClass);
-		// FluidTankRendererMixin is applied first. Later injectors then see slot 0 still holding this.
-		FluidTankRenderFix.repair(targetClass);
 	}
 
 	@Override

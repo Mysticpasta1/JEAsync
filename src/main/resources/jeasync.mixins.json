@@ -55,7 +55,6 @@
     "nbt.ItemStackTagAccess"
   ],
   "client": [
-    "client.FluidTankRendererMixin",
     "client.MinecraftClientAccessor",
     "client.MinecraftClientMixin",
     "collect.RegistryUtilMixin",
