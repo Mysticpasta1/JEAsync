@@ -10,8 +10,6 @@ import mezz.jei.modshade.org.apache.lucene.document.NumericDocValuesField;
 import mezz.jei.modshade.org.apache.lucene.document.StringField;
 import mezz.jei.modshade.org.apache.lucene.index.IndexWriter;
 import mezz.jei.modshade.org.apache.lucene.index.IndexWriterConfig;
-import mezz.jei.modshade.org.apache.lucene.index.SerialMergeScheduler;
-import mezz.jei.modshade.org.apache.lucene.index.TieredMergePolicy;
 import mezz.jei.modshade.org.apache.lucene.store.Directory;
 import org.apache.logging.log4j.LogManager;
 import org.jetbrains.annotations.Nullable;
@@ -24,8 +22,6 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
@@ -41,12 +37,15 @@ import java.util.ArrayList;
  * index bytes are both live together. That is the multi-gigabyte gap between a finished load and
  * the load itself.
  * <p>
- * Batches are written with one {@link IndexWriter} kept open for the build. Merges stay on the
- * indexing thread and are capped, so a background merge cannot allocate another copy of the index.
+ * Batches are written with one {@link IndexWriter} kept open for the build.
  * {@code refresh} and {@code removeAll} still do the final reader open and the deletes; they need
  * this writer closed first because the directory allows one writer.
  * <p>
- * Targets upstream 15.74.0.225.
+ * The 15.74.0.234 jar slices its shaded Lucene classes down to the API JEI itself uses, so the
+ * merge scheduler and merge policy setters are no longer present. The writer uses Lucene's
+ * defaults; batching is what keeps the pending strings from being held until the index closes.
+ * <p>
+ * Targets upstream 15.74.0.234.
  */
 @Mixin(value = LuceneSearchStorage.class, remap = false)
 public abstract class LuceneSearchStorageMixin {
@@ -109,7 +108,7 @@ public abstract class LuceneSearchStorageMixin {
 	 * @author Mysticpasta1
 	 * @reason Hold a bounded batch of search strings, then write them, so the rest can be collected.
 	 */
-	@Inject(method = "put", at = @At("RETURN"), remap = false)
+	@Inject(method = "put", at = @At("HEAD"), remap = false)
 	private void jeasync$flushSearchBatch(String key, Object value, CallbackInfo ci) {
 		if (key != null) {
 			this.jeasync$pendingChars += key.length();
@@ -167,9 +166,6 @@ public abstract class LuceneSearchStorageMixin {
 					document.add(new IntPoint(VALUE_FIELD, valueId));
 					writer.addDocument(document);
 				}
-			} catch (IOException e) {
-				this.jeasync$abandonWriter(e);
-				throw new UncheckedIOException(e);
 			} catch (RuntimeException e) {
 				this.jeasync$abandonWriter(e);
 				throw e;
@@ -193,19 +189,8 @@ public abstract class LuceneSearchStorageMixin {
 		if (writer != null) {
 			return writer;
 		}
-		TieredMergePolicy policy = new TieredMergePolicy();
-		// Default max merged segment is 5GB, which copies a finished index again while strings are still live.
-		policy.setMaxMergedSegmentMB(32);
-		policy.setMaxMergeAtOnce(4);
 		IndexWriterConfig config = new IndexWriterConfig(ANALYZER);
-		config.setRAMBufferSizeMB(8);
-		config.setMergePolicy(policy);
-		config.setMergeScheduler(new SerialMergeScheduler());
-		try {
-			writer = new IndexWriter(this.directory, config);
-		} catch (IOException e) {
-			throw new UncheckedIOException(e);
-		}
+		writer = new IndexWriter(this.directory, config);
 		this.jeasync$writer = writer;
 		return writer;
 	}
@@ -222,11 +207,7 @@ public abstract class LuceneSearchStorageMixin {
 				return;
 			}
 			this.jeasync$writer = null;
-			try {
-				writer.close();
-			} catch (IOException e) {
-				throw new UncheckedIOException(e);
-			}
+			writer.close();
 			this.readerDirty = true;
 		}
 	}
@@ -244,7 +225,7 @@ public abstract class LuceneSearchStorageMixin {
 		}
 		try {
 			writer.close();
-		} catch (IOException closeFailure) {
+		} catch (RuntimeException closeFailure) {
 			failure.addSuppressed(closeFailure);
 		}
 		this.readerDirty = true;

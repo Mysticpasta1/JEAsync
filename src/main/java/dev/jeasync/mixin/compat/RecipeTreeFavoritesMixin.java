@@ -3,13 +3,17 @@ package dev.jeasync.mixin.compat;
 import mezz.jei.common.Internal;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Overwrite;
+import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.Shadow;
 
 /**
  * JEI++ 1.0.7 calls {@code Internal.getJeiClientConfigs()}, which JEI 15.71 removed.
  * Targets upstream JEI++ 1.0.7 against JEI 15.71.0.224.
+ * <p>
+ * The target is a string so this mixin class still loads when JEI++ is not installed.
  */
-@Mixin(value = com.lingmu0.JeiPlusPlusMod.client.RecipeTreeFavorites.class, remap = false)
+@Pseudo
+@Mixin(targets = "com.lingmu0.JeiPlusPlusMod.client.RecipeTreeFavorites", remap = false)
 public abstract class RecipeTreeFavoritesMixin {
 	@Shadow
 	private static int laidOutBookmarkColumns() {

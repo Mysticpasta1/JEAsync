@@ -9,7 +9,7 @@ This is **not** a fork of JEI. It depends on a published JEI release as an ordin
 patches it at runtime with mixins.
 
 - **Mod id:** `jeasync` (display name `jeasync`)
-- **Targets:** Minecraft 1.20.1, Forge 47.x, JEI `15.74.0.228`
+- **Targets:** Minecraft 1.20.1, Forge 47.x, JEI `15.74.0.234`
 - **Java:** 17
 
 ## Performance, measured
@@ -380,8 +380,7 @@ one fewer list per recipe that never gets looked at.
 JEI 15.74.0.225 switched ingredient search to an in-memory Lucene index, and the build holds every
 search string until the index is opened - the strings and the index bytes are both live at the
 peak. jeasync writes bounded batches of 1024 strings instead, with one writer kept open for the
-build and the merges capped, so the strings are collected while the index grows rather than all at
-once at the end.
+build, so the strings are collected while the index grows rather than all at once at the end.
 
 ## Configuration
 

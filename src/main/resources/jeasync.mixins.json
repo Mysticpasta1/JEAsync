@@ -21,6 +21,7 @@
     "load.IngredientManagerBuilderMixin",
     "collect.IngredientToRecipesMapMixin",
     "collect.RecipeMapMixin",
+    "local.RecipeMapLocalSlotsMixin",
     "collect.TypedItemStackMixin",
     "collect.TypedItemStackAccess",
     "collect.NormalizedTypedItemStackMixin",
@@ -42,6 +43,8 @@
     "search.IngredientFilterMixin",
     "search.LuceneSearchStorageMixin",
     "load.PluginCallerMixin",
+    "local.PluginCallerLocalSlotsMixin",
+    "local.FluidHelperLocalSlotsMixin",
     "load.VanillaPluginMixin",
     "thread.BlockableEventLoopMixin",
     "thread.EventSubclassTransformerMixin",
@@ -66,7 +69,14 @@
     "startup.GuiEventHandlerMixin",
     "startup.GuiTextFieldFilterMixin",
     "load.ItemStackHelperMixin",
-    "load.GuiHandlerRegistrationMixin"
+    "load.GuiHandlerRegistrationMixin",
+    "local.FluidTankRendererLocalSlotsMixin",
+    "local.RecipeCategoryTabLocalSlotsMixin",
+    "local.RecipeLayoutLocalSlotsMixin",
+    "local.RecipesGuiLocalSlotsMixin",
+    "local.BookmarkOverlayLocalSlotsMixin",
+    "local.IngredientLookupStateLocalSlotsMixin",
+    "local.RecipeTransferButtonControllerLocalSlotsMixin"
   ],
   "injectors": {
     "defaultRequire": 1

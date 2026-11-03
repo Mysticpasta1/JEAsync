@@ -804,11 +804,30 @@ public final class JeiRemovedTypeRewrite {
 		InsnList insns = new InsnList();
 		insns.add(new InsnNode(Opcodes.RETURN));
 		clearMethodBody(method, insns);
+		clearInjections(method);
 		method.maxStack = 0;
 		if (method.maxLocals < 1) {
 			method.maxLocals = 1;
 		}
 		return true;
+	}
+
+	/**
+	 * A stubbed handler must stop being an injection handler too. Leaving {@code @Inject} on an
+	 * empty method still makes Mixin reload the target method's argument slots when it builds the
+	 * callback, which fails verification on JEI 0.233+.
+	 */
+	private static void clearInjections(MethodNode method) {
+		if (method.visibleAnnotations != null) {
+			method.visibleAnnotations.removeIf(annotation -> isInjectionAnnotation(annotation.desc));
+		}
+		if (method.invisibleAnnotations != null) {
+			method.invisibleAnnotations.removeIf(annotation -> isInjectionAnnotation(annotation.desc));
+		}
+	}
+
+	private static boolean isInjectionAnnotation(String descriptor) {
+		return descriptor.contains("/injection/") || descriptor.contains("mixinextras/injector");
 	}
 
 	private static boolean stubReturnArgument(ClassNode classNode, String name, int slot) {
@@ -820,6 +839,7 @@ public final class JeiRemovedTypeRewrite {
 		insns.add(new VarInsnNode(Opcodes.ALOAD, slot));
 		insns.add(new InsnNode(Opcodes.ARETURN));
 		clearMethodBody(method, insns);
+		clearInjections(method);
 		method.maxStack = 1;
 		if (method.maxLocals < slot + 1) {
 			method.maxLocals = slot + 1;
@@ -836,6 +856,7 @@ public final class JeiRemovedTypeRewrite {
 		insns.add(new InsnNode(Opcodes.ICONST_0));
 		insns.add(new InsnNode(Opcodes.IRETURN));
 		clearMethodBody(method, insns);
+		clearInjections(method);
 		method.maxStack = 1;
 		if (method.maxLocals < 1) {
 			method.maxLocals = 1;

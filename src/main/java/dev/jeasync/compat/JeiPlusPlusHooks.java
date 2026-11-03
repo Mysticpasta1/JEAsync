@@ -7,11 +7,14 @@ import java.lang.reflect.Method;
  * The layouts class loads even when JEI++ is absent, so this type does not name JEI++ classes.
  */
 public final class JeiPlusPlusHooks {
+	private static final String JEI_PLUS_PLUS = "com.lingmu0.JeiPlusPlusMod.JeiPlusPlus";
+
 	private JeiPlusPlusHooks() {
 	}
 
 	public static Object recipeTreePress(Object layouts, Object input) {
 		try {
+			Class.forName(JEI_PLUS_PLUS, false, JeiPlusPlusHooks.class.getClassLoader());
 			Class<?> bridge = Class.forName("dev.jeasync.compat.JeiPlusPlusBridge");
 			Method press = bridge.getMethod("recipeTreePress", Object.class, Object.class);
 			return press.invoke(null, layouts, input);

@@ -9,7 +9,6 @@ import dev.jeasync.client.JeiLoadOverlay;
 import dev.jeasync.client.RecipeSyncProgress;
 import mezz.jei.common.Internal;
 import mezz.jei.common.network.IConnectionToServer;
-import mezz.jei.forge.events.PermanentEventSubscriptions;
 import mezz.jei.forge.startup.StartEventObserver;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -112,9 +111,13 @@ public abstract class StartEventObserverMixin {
 	/**
 	 * @author Mysticpasta1
 	 * @reason JEI's own tick registration can miss the join. This mod's client tick is the one that runs.
+	 * <p>
+	 * 0.233 and 0.234 reuse the slots that held {@code this} and the subscriptions argument inside
+	 * {@code register}. A TAIL hook reloads those clobbered slots and fails verification, so arm
+	 * the startup check at HEAD while both slots still hold their declared values.
 	 */
-	@Inject(method = "register", at = @At("TAIL"), remap = false)
-	private void jeasync$watchForLoadedRecipes(PermanentEventSubscriptions subscriptions, CallbackInfo ci) {
+	@Inject(method = "register", at = @At("HEAD"), remap = false)
+	private void jeasync$watchForLoadedRecipes(CallbackInfo ci) {
 		JeiLoadOverlay.armStartup(this::jeasync$startFromClientTick);
 	}
 

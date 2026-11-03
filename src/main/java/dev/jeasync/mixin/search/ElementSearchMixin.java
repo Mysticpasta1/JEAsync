@@ -17,16 +17,17 @@ import mezz.jei.gui.ingredients.IListElementInfo;
 import mezz.jei.gui.search.ElementSearch;
 import mezz.jei.gui.search.ElementPrefixParser;
 import mezz.jei.gui.search.ElementSearchIndex;
+import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Mutable;
 import org.spongepowered.asm.mixin.Overwrite;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
@@ -60,15 +61,18 @@ import dev.jeasync.AsyncPluginSupport;
  * <p>
  * <b>{@code add} is deliberately not overwritten.</b> Other add-ons inject into it - AllTheLeaks
  * patches this class's {@code add} to clear a retained reference - and overwriting the method removes
- * their injection point, which silently disables their patch. The {@code allElements} write is
- * redirected onto the same monitor as the lookups. See
+ * their injection point, which silently disables their patch. The backing map is replaced with a
+ * synchronized wrapper in the constructor instead, so the {@code add} write takes the same monitor
+ * as the lookups without touching the method body. See
  * {@link dev.jeasync.mixin.collect.IngredientSetMixin} for the same trade on the other class.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 15.74.0.234.
  */
 @Mixin(value = ElementSearch.class, remap = false)
 public abstract class ElementSearchMixin {
 	@Shadow
+	@Final
+	@Mutable
 	private Map<Object, IListElement<?>> allElements;
 
 	@Shadow
@@ -84,11 +88,6 @@ public abstract class ElementSearchMixin {
 	private ElementPrefixParser elementPrefixParser;
 
 	@Shadow
-	private void rebuildSearchIndex(ElementSearchIndex searchIndex, Collection<IListElementInfo<?>> infos) {
-		throw new AssertionError();
-	}
-
-	@Shadow
 	private void updateCombinedSearchables() {
 		throw new AssertionError();
 	}
@@ -98,22 +97,21 @@ public abstract class ElementSearchMixin {
 		throw new AssertionError();
 	}
 
-	// Mixin does not apply a field initialiser, so this is created on first use.
-	private static volatile ThreadLocal<Boolean> jeiAsyncEmptyInfos;
-
-	private static ThreadLocal<Boolean> jeiAsyncEmptyInfos() {
-		ThreadLocal<Boolean> local = jeiAsyncEmptyInfos;
-		if (local != null) {
-			return local;
-		}
-		synchronized (ElementSearchMixin.class) {
-			local = jeiAsyncEmptyInfos;
-			if (local == null) {
-				local = ThreadLocal.withInitial(() -> Boolean.FALSE);
-				jeiAsyncEmptyInfos = local;
-			}
-			return local;
-		}
+	/**
+	 * Replaces the constructor's plain {@code HashMap} with a synchronized wrapper. Writes through
+	 * {@code add} then share the monitor the lookups already use, without redirecting a call inside
+	 * {@code add} (whose local slots are reused by the 0.233+ bytecode optimizer).
+	 */
+	@Redirect(
+		method = "<init>",
+		at = @At(
+			value = "FIELD",
+			target = "Lmezz/jei/gui/search/ElementSearch;allElements:Ljava/util/Map;",
+			opcode = org.objectweb.asm.Opcodes.PUTFIELD
+		)
+	)
+	private void jeasync$synchronizedAllElements(ElementSearch instance, Map<Object, IListElement<?>> map) {
+		this.allElements = Collections.synchronizedMap(map);
 	}
 
 	/**
@@ -121,55 +119,21 @@ public abstract class ElementSearchMixin {
 	 * allocate their strings here, and that used to happen in the middle of startup while recipes
 	 * and the GUI were still being built. A placeholder keeps the map entry without opening a
 	 * Lucene index. The real strings are filled in after startup returns.
+	 * <p>
+	 * Overwritten rather than redirected because the 0.233+ bytecode optimizer reuses the local
+	 * slots {@code this} and the arguments live in, which a redirect would reload.
 	 */
-	@Inject(method = "rebuildSearchIndex", at = @At("HEAD"), remap = false)
-	private void jeasync$markHeavyIndex(ElementSearchIndex searchIndex, Collection<IListElementInfo<?>> infos, CallbackInfo ci) {
-		jeiAsyncEmptyInfos().set(
-			JeiLoadProgress.isDeferringHeavySearch() && searchIndex != ElementSearchIndex.NAMES_AND_ALIASES
-		);
-	}
-
-	@Inject(method = "rebuildSearchIndex", at = @At("RETURN"), remap = false)
-	private void jeasync$clearHeavyIndex(ElementSearchIndex searchIndex, Collection<IListElementInfo<?>> infos, CallbackInfo ci) {
-		ThreadLocal<Boolean> local = jeiAsyncEmptyInfos;
-		if (local != null) {
-			local.set(Boolean.FALSE);
+	@Overwrite
+	private void rebuildSearchIndex(ElementSearchIndex searchIndex, Collection<IListElementInfo<?>> infos) {
+		PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo =
+			((ElementPrefixParserInvoker) (Object) this.elementPrefixParser).jeasync$invokeGetPrefixInfo(searchIndex);
+		PrefixedSearchable<IListElementInfo<?>, IListElement<?>> searchable;
+		if (JeiLoadProgress.isDeferringHeavySearch() && searchIndex != ElementSearchIndex.NAMES_AND_ALIASES) {
+			searchable = new PrefixedSearchable<>(DeferredSearchStorage.get(), prefixInfo);
+		} else {
+			searchable = createSearchable(prefixInfo, infos);
 		}
-	}
-
-	@Redirect(
-		method = "rebuildSearchIndex",
-		at = @At(
-			value = "INVOKE",
-			target = "Lmezz/jei/gui/search/ElementSearch;createSearchable(Lmezz/jei/common/search/PrefixInfo;Ljava/util/Collection;)Lmezz/jei/common/search/PrefixedSearchable;"
-		)
-	)
-	private PrefixedSearchable<IListElementInfo<?>, IListElement<?>> jeasync$deferHeavyStrings(
-		PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo,
-		Collection<IListElementInfo<?>> infos
-	) {
-		ThreadLocal<Boolean> local = jeiAsyncEmptyInfos;
-		if (local != null && Boolean.TRUE.equals(local.get())) {
-			return new PrefixedSearchable<>(DeferredSearchStorage.get(), prefixInfo);
-		}
-		return createSearchable(prefixInfo, infos);
-	}
-
-	/**
-	 * {@code add} itself stays in place so an injector aimed at its body still matches.
-	 * The map write takes {@code allElements}, which is the monitor the lookups already use.
-	 */
-	@Redirect(
-		method = "add",
-		at = @At(
-			value = "INVOKE",
-			target = "Ljava/util/Map;put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
-		)
-	)
-	private Object jeasync$putElement(Map<Object, IListElement<?>> map, Object uid, Object element) {
-		synchronized (allElements) {
-			return map.put(uid, (IListElement<?>) element);
-		}
+		this.prefixedSearchables.put(prefixInfo, searchable);
 	}
 
 	/**

@@ -5,6 +5,7 @@ import java.util.Set;
 
 import dev.jeasync.compat.ErrorUtilBridge;
 import dev.jeasync.compat.JeiRemovedTypeRewrite;
+import dev.jeasync.compat.LocalSlotFixer;
 import dev.jeasync.compat.SearchFieldBridge;
 import net.minecraftforge.fml.loading.FMLEnvironment;
 import org.objectweb.asm.tree.ClassNode;
@@ -45,6 +46,7 @@ public final class JeAsyncMixinPlugin implements IMixinConfigPlugin {
 
 	@Override
 	public void preApply(String targetClassName, ClassNode targetClass, String mixinClassName, IMixinInfo mixinInfo) {
+		LocalSlotFixer.prepare(targetClass);
 		ErrorUtilBridge.prepare(targetClass);
 		SearchFieldBridge.prepare(targetClass);
 	}

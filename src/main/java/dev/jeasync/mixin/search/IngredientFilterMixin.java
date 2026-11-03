@@ -5,18 +5,12 @@ import dev.jeasync.AsyncSearchCoordinator;
 import dev.jeasync.FilterWork;
 import dev.jeasync.JeiLoadProgress;
 import dev.jeasync.RuntimeIngredientUpdates;
-import mezz.jei.api.helpers.IColorHelper;
 import mezz.jei.api.helpers.IModIdHelper;
 import mezz.jei.api.ingredients.IIngredientHelper;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.runtime.IIngredientManager;
-import mezz.jei.api.runtime.IIngredientVisibility;
-import mezz.jei.api.search.ISearchStorageBuilderFactory;
-import mezz.jei.common.config.IClientConfig;
-import mezz.jei.common.config.IClientToggleState;
 import mezz.jei.common.config.IIngredientFilterConfig;
 import mezz.jei.common.util.Translator;
-import mezz.jei.gui.config.IngredientTypeSortingConfig;
 import mezz.jei.gui.filter.IFilterTextSource;
 import mezz.jei.gui.ingredients.IListElement;
 import mezz.jei.gui.ingredients.IListElementInfo;
@@ -72,7 +66,7 @@ import java.util.stream.Stream;
  * plugin startup. {@link #jeiAsyncBuildDeferredSearch()} fills them in after that returns, from
  * the element info cache, so the string allocations do not overlap recipe registration.
  * <p>
- * Targets upstream 15.74.0.225.
+ * Targets upstream 15.74.0.234.
  */
 @Mixin(value = mezz.jei.gui.ingredients.IngredientFilter.class, remap = false)
 public abstract class IngredientFilterMixin {
@@ -150,21 +144,7 @@ public abstract class IngredientFilterMixin {
 	 * Heavy prefixes were skipped while startup was still running.
 	 */
 	@Inject(method = "<init>", at = @At("RETURN"))
-	private void jeasync$deferHeavySearch(
-		IFilterTextSource filterTextSource,
-		IClientConfig clientConfig,
-		IIngredientFilterConfig config,
-		IIngredientManager ingredientManager,
-		Function<List<IListElementInfo<?>>, Comparator<IListElement<?>>> sortIndexUpdater,
-		List<IListElementInfo<?>> ingredients,
-		IModIdHelper modIdHelper,
-		IIngredientVisibility ingredientVisibility,
-		IngredientTypeSortingConfig ingredientTypeSortingConfig,
-		IColorHelper colorHelper,
-		ISearchStorageBuilderFactory searchStorageBuilderFactory,
-		IClientToggleState clientToggleState,
-		CallbackInfo ci
-	) {
+	private void jeasync$deferHeavySearch(CallbackInfo ci) {
 		if (JeiLoadProgress.isLoading()) {
 			JeiLoadProgress.deferHeavySearch(this::jeiAsyncBuildDeferredSearch);
 		}
