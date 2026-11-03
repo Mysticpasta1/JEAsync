@@ -57,11 +57,7 @@ import java.util.ConcurrentModificationException;
  * built, stops and starts again on that same worker. A few syncs in one load are applied.
  * Further ones are logged and skipped so a plugin that posts recipe events cannot restart forever.
  * <p>
- * Targets upstream 15.74.0.233.
- * <p>
- * The overlay is armed at {@code HEAD} of {@code register}. That method now calls the 3-arg
- * {@code PermanentEventSubscriptions.register(EventPriority, Class, Consumer)} plus lambdas;
- * a {@code TAIL} inject there rewrites the operand stack into a {@code VerifyError} on class load.
+ * Targets upstream 15.74.0.225.
  */
 @Mixin(value = StartEventObserver.class, remap = false)
 public abstract class StartEventObserverMixin {
@@ -117,7 +113,7 @@ public abstract class StartEventObserverMixin {
 	 * @author Mysticpasta1
 	 * @reason JEI's own tick registration can miss the join. This mod's client tick is the one that runs.
 	 */
-	@Inject(method = "register(Lmezz/jei/forge/events/PermanentEventSubscriptions;)V", at = @At("HEAD"), remap = false)
+	@Inject(method = "register", at = @At("TAIL"), remap = false)
 	private void jeasync$watchForLoadedRecipes(PermanentEventSubscriptions subscriptions, CallbackInfo ci) {
 		JeiLoadOverlay.armStartup(this::jeasync$startFromClientTick);
 	}

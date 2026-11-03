@@ -9,7 +9,7 @@ This is **not** a fork of JEI. It depends on a published JEI release as an ordin
 patches it at runtime with mixins.
 
 - **Mod id:** `jeasync` (display name `jeasync`)
-- **Targets:** Minecraft 1.20.1, Forge 47.x, JEI `15.74.0.233`
+- **Targets:** Minecraft 1.20.1, Forge 47.x, JEI `15.74.0.228`
 - **Java:** 17
 
 ## Performance, measured
