@@ -152,13 +152,17 @@ public abstract class PluginCallerMixin {
 			List<CompletableFuture<Void>> leadFutures = new ArrayList<>();
 			List<IModPlugin> leadRetry = Collections.synchronizedList(new ArrayList<>());
 			List<IModPlugin> leadInline = new ArrayList<>();
-			for (IModPlugin plugin : leading) {
-				if (AsyncPluginSupport.isAsyncCapable(plugin)) {
-					leadFutures.add(dispatchAsync(title, plugin, func, leadRetry));
-				} else {
-					leadInline.add(plugin);
-				}
+		for (IModPlugin plugin : leading) {
+			// Vanilla publishes item_stack and the fluid type. Its registerFluidIngredients loads
+			// client-only render classes that fail verification when loaded off-thread by the
+			// worker pool's TransformingClassLoader, and the failed class load is cached so the
+			// client-thread retry also fails. Run it inline on the client thread.
+			if (AsyncPluginSupport.isAsyncCapable(plugin) && !(plugin instanceof VanillaPlugin)) {
+				leadFutures.add(dispatchAsync(title, plugin, func, leadRetry));
+			} else {
+				leadInline.add(plugin);
 			}
+		}
 			if (!leadFutures.isEmpty()) {
 				try {
 					CompletableFuture.allOf(leadFutures.toArray(new CompletableFuture[0])).join();

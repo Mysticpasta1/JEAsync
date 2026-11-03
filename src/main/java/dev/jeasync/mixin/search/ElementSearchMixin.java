@@ -6,6 +6,7 @@ import dev.jeasync.RuntimeIngredientUpdates;
 import mezz.jei.api.ingredients.IIngredientHelper;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.ingredients.subtypes.UidContext;
+import mezz.jei.api.runtime.IIngredientManager;
 import mezz.jei.api.search.ISearchStorage;
 import mezz.jei.api.search.ISearchStorageBuilder;
 import mezz.jei.common.config.SearchMode;
@@ -58,11 +59,11 @@ import dev.jeasync.AsyncPluginSupport;
  * {@link #getAllIngredients} returns a snapshot for the same reason: callers iterate the result
  * outside the lock.
  * <p>
- * <b>{@code add} is deliberately not overwritten.</b> Other add-ons inject into it - AllTheLeaks
- * patches this class's {@code add} to clear a retained reference - and overwriting the method removes
- * their injection point, which silently disables their patch. The {@code allElements} write is
- * redirected onto the same monitor as the lookups. See
- * {@link dev.jeasync.mixin.collect.IngredientSetMixin} for the same trade on the other class.
+ * {@code add} is overwritten so the {@code allElements} write is taken under the {@code allElements}
+ * monitor. Other add-ons inject into it - AllTheLeaks patches this class's {@code add} to clear a
+ * retained reference - and overwriting the method removes their injection point, which silently
+ * disables their patch. The alternative is JEI failing to load entirely because SpongePowerED cannot
+ * redirect the {@code Map.put} inside {@code add} (see {@link #add}).
  * <p>
  * Targets upstream 15.71.0.224.
  */
@@ -89,7 +90,10 @@ public abstract class ElementSearchMixin {
 	}
 
 	@Shadow
-	private void updateCombinedSearchables() {
+	private static PrefixedSearchable<IListElementInfo<?>, IListElement<?>> createSearchable(
+		PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo,
+		Collection<IListElementInfo<?>> infos
+	) {
 		throw new AssertionError();
 	}
 
@@ -98,77 +102,37 @@ public abstract class ElementSearchMixin {
 		throw new AssertionError();
 	}
 
-	// Mixin does not apply a field initialiser, so this is created on first use.
-	private static volatile ThreadLocal<Boolean> jeiAsyncEmptyInfos;
-
-	private static ThreadLocal<Boolean> jeiAsyncEmptyInfos() {
-		ThreadLocal<Boolean> local = jeiAsyncEmptyInfos;
-		if (local != null) {
-			return local;
-		}
-		synchronized (ElementSearchMixin.class) {
-			local = jeiAsyncEmptyInfos;
-			if (local == null) {
-				local = ThreadLocal.withInitial(() -> Boolean.FALSE);
-				jeiAsyncEmptyInfos = local;
-			}
-			return local;
-		}
+	@Shadow
+	private void updateCombinedSearchables() {
+		throw new AssertionError();
 	}
 
 	/**
-	 * Name search is built with the ingredient list. The other prefixes, tooltips especially,
-	 * allocate their strings here, and that used to happen in the middle of startup while recipes
-	 * and the GUI were still being built. A placeholder keeps the map entry without opening a
-	 * Lucene index. The real strings are filled in after startup returns.
+	 * @author Mysticpasta1
+	 * @reason Lock the element map so a lookup does not race an add. Overwritten because SpongePowerED
+	 * cannot redirect the {@code Map.put} inside {@code add}: the method reuses local 0 for the element,
+	 * so a non-static redirector loads the wrong value as {@code this} (VerifyError), and a static one
+	 * is rejected because {@code add} is not a static method.
 	 */
-	@Inject(method = "rebuildSearchIndex", at = @At("HEAD"), remap = false)
-	private void jeasync$markHeavyIndex(ElementSearchIndex searchIndex, Collection<IListElementInfo<?>> infos, CallbackInfo ci) {
-		jeiAsyncEmptyInfos().set(
-			JeiLoadProgress.isDeferringHeavySearch() && searchIndex != ElementSearchIndex.NAMES_AND_ALIASES
-		);
-	}
-
-	@Inject(method = "rebuildSearchIndex", at = @At("RETURN"), remap = false)
-	private void jeasync$clearHeavyIndex(ElementSearchIndex searchIndex, Collection<IListElementInfo<?>> infos, CallbackInfo ci) {
-		ThreadLocal<Boolean> local = jeiAsyncEmptyInfos;
-		if (local != null) {
-			local.set(Boolean.FALSE);
-		}
-	}
-
-	@Redirect(
-		method = "rebuildSearchIndex",
-		at = @At(
-			value = "INVOKE",
-			target = "Lmezz/jei/gui/search/ElementSearch;createSearchable(Lmezz/jei/common/search/PrefixInfo;Ljava/util/Collection;)Lmezz/jei/common/search/PrefixedSearchable;"
-		)
-	)
-	private PrefixedSearchable<IListElementInfo<?>, IListElement<?>> jeasync$deferHeavyStrings(
-		PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo,
-		Collection<IListElementInfo<?>> infos
-	) {
-		ThreadLocal<Boolean> local = jeiAsyncEmptyInfos;
-		if (local != null && Boolean.TRUE.equals(local.get())) {
-			return new PrefixedSearchable<>(DeferredSearchStorage.get(), prefixInfo);
-		}
-		return createSearchable(prefixInfo, infos);
-	}
-
-	/**
-	 * {@code add} itself stays in place so an injector aimed at its body still matches.
-	 * The map write takes {@code allElements}, which is the monitor the lookups already use.
-	 */
-	@Redirect(
-		method = "add",
-		at = @At(
-			value = "INVOKE",
-			target = "Ljava/util/Map;put(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
-		)
-	)
-	private Object jeasync$putElement(Map<Object, IListElement<?>> map, Object uid, Object element) {
+	@SuppressWarnings("unchecked")
+	@Overwrite
+	public <T> void add(IListElementInfo<T> info, IIngredientManager manager) {
+		IListElement<T> element = info.getElement();
+		Object uid = manager.getIngredientHelper(element.getTypedIngredient().getType())
+			.getUid(element.getTypedIngredient(), UidContext.Ingredient);
 		synchronized (allElements) {
-			return map.put(uid, (IListElement<?>) element);
+			allElements.put(uid, element);
+		}
+		for (PrefixedSearchable<IListElementInfo<?>, IListElement<?>> searchable : prefixedSearchables.values()) {
+			if (searchable.getMode() == SearchMode.DISABLED) {
+				continue;
+			}
+			ISearchStorage<IListElement<?>> storage = searchable.getSearchStorage();
+			for (String key : searchable.getStrings(info)) {
+				if (!key.trim().isEmpty()) {
+					storage.put(key, element);
+				}
+			}
 		}
 	}
 
@@ -204,39 +168,6 @@ public abstract class ElementSearchMixin {
 	 * code, and calling that from several threads at once is not something this add-on is prepared
 	 * to assume is safe.
 	 */
-	/**
-	 * @author Mysticpasta1
-	 * @reason Build one prefix index without sharing a mutable builder across threads.
-	 */
-	@Overwrite
-	private static PrefixedSearchable<IListElementInfo<?>, IListElement<?>> createSearchable(
-		PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo,
-		Collection<IListElementInfo<?>> infos
-	) {
-		SearchMode searchMode = prefixInfo.getMode();
-		if (searchMode == SearchMode.DISABLED) {
-			return new PrefixedSearchable<>(DeferredSearchStorage.get(), prefixInfo);
-		}
-		long started = System.nanoTime();
-		ISearchStorageBuilder<IListElement<?>> storageBuilder = prefixInfo.createStorageBuilder();
-		for (IListElementInfo<?> info : infos) {
-			Collection<String> strings = prefixInfo.getStrings(info);
-			IListElement<?> element = info.getElement();
-			for (String string : strings) {
-				String trimmed = string.trim();
-				if (!trimmed.isEmpty()) {
-					storageBuilder.put(trimmed, element);
-				}
-			}
-		}
-		ISearchStorage<IListElement<?>> searchStorage = storageBuilder.build();
-		long elapsed = (System.nanoTime() - started) / 1_000_000L;
-		if (elapsed >= JEI_ASYNC_TIMING_THRESHOLD_MILLIS) {
-			org.apache.logging.log4j.LogManager.getLogger(ElementSearchMixin.class)
-				.info("Search index for prefix {} took {} ms over {} ingredients", prefixInfo, elapsed, infos.size());
-		}
-		return new PrefixedSearchable<>(searchStorage, prefixInfo);
-	}
 
 	private static final long JEI_ASYNC_TIMING_THRESHOLD_MILLIS = 25;
 
