@@ -35,6 +35,8 @@ public final class JeAsyncConfig {
 		public final ForgeConfigSpec.BooleanValue skipAnvilRepairRecipes;
 		public final ForgeConfigSpec.BooleanValue filterEmptyRecipes;
 		public final ForgeConfigSpec.BooleanValue capStorageTintVariants;
+		public final ForgeConfigSpec.BooleanValue optimizeXycraft;
+		public final ForgeConfigSpec.IntValue maxPotionDisplayStacks;
 		public final ForgeConfigSpec.ConfigValue<List<? extends String>> skippedRecipeSerializers;
 		public final ForgeConfigSpec.ConfigValue<List<? extends String>> dedupRecipeSerializers;
 		public final ForgeConfigSpec.ConfigValue<List<? extends String>> skippedCategories;
@@ -96,6 +98,31 @@ public final class JeAsyncConfig {
 					"Turning it off builds a copy per colour again."
 				)
 				.define("capStorageTintVariants", true);
+
+			optimizeXycraft = builder
+				.comment(
+					"XyCraft's JEI plugin builds a rule-to-block-state map, then derives the item and",
+					"fluid lists each rule displays and never reads the block-state map again. On a",
+					"modded pack that intermediate map holds every matching block state for every",
+					"rule and was about 87 MB in one heap dump. When this is on the map is released",
+					"after JEI finishes loading, and duplicate item stacks in the derived lists are",
+					"collapsed. Recipe display and matching are unchanged. Turning it off keeps the",
+					"map for anything else that reads it."
+				)
+				.define("optimizeXycraft", true);
+
+			maxPotionDisplayStacks = builder
+				.comment(
+					"Mantle's potion display ingredient expands to every registered potion for every",
+					"potion item, so a pack with many potions can build hundreds of thousands of",
+					"stacks behind one recipe and keep them cached. Recipe matching does not use that",
+					"expansion: the ingredient tests the item and tag directly. A positive value caps",
+					"how many variants are materialised for JEI to display, which bounds both the",
+					"display cache and the ingredient entries JEI keeps, but it also means the recipe",
+					"viewer shows fewer potion variants. 0 (the default) keeps the full expansion and",
+					"leaves this lossy trade-off opt-in."
+				)
+				.defineInRange("maxPotionDisplayStacks", 0, 0, 100000);
 
 			skippedRecipeSerializers = builder
 				.comment(

@@ -1,5 +1,6 @@
 package dev.jeasync;
 
+import dev.jeasync.compat.JeiCaches;
 import net.minecraftforge.fml.loading.FMLEnvironment;
 
 import java.lang.reflect.Method;
@@ -199,6 +200,7 @@ public final class JeiLoadProgress {
 		failed = false;
 		TypedIngredientIntern.clear();
 		AnvilEnchantCache.clear();
+		JeiCaches.clearTypedItemStackCache();
 		scheduleOnClient(JeiLoadProgress::publishDeferredGui);
 	}
 
@@ -216,6 +218,7 @@ public final class JeiLoadProgress {
 		deferredHeavySearch = null;
 		TypedIngredientIntern.clear();
 		AnvilEnchantCache.clear();
+		JeiCaches.clearTypedItemStackCache();
 	}
 
 	public static void fail(String message) {
@@ -227,6 +230,7 @@ public final class JeiLoadProgress {
 		guiReady = false;
 		TypedIngredientIntern.clear();
 		AnvilEnchantCache.clear();
+		JeiCaches.clearTypedItemStackCache();
 	}
 
 	private static void runDeferredHeavySearch() {

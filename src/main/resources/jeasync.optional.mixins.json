@@ -27,7 +27,9 @@
     "MekanismJEIRecipeTypeMixin",
     "AvaritiaJeiPluginMixin",
     "MovingStorageTintVariantsMixin",
-    "SpawnerRecipeSortMixin"
+    "SpawnerRecipeSortMixin",
+    "PotionDisplayIngredientMixin",
+    "XyCraftJeiPluginMixin"
   ],
   "injectors": {
     "defaultRequire": 0

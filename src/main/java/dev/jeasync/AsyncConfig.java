@@ -21,6 +21,8 @@ public final class AsyncConfig {
 	private static final String DEDUP_RECIPE_SERIALIZERS_PROPERTY = "jeasync.dedupRecipeSerializers";
 	private static final String FILTER_EMPTY_RECIPES_PROPERTY = "jeasync.filterEmptyRecipes";
 	private static final String CAP_STORAGE_TINT_VARIANTS_PROPERTY = "jeasync.capStorageTintVariants";
+	private static final String OPTIMIZE_XYCRAFT_PROPERTY = "jeasync.optimizeXycraft";
+	private static final String MAX_POTION_DISPLAY_STACKS_PROPERTY = "jeasync.maxPotionDisplayStacks";
 	private static final String SKIPPED_CATEGORIES_PROPERTY = "jeasync.skippedCategories";
 
 	/**
@@ -111,6 +113,43 @@ public final class AsyncConfig {
 	 */
 	public static boolean capStorageTintVariants() {
 		return resolveBoolean(CAP_STORAGE_TINT_VARIANTS_PROPERTY, JeAsyncConfig.COMMON.capStorageTintVariants, true);
+	}
+
+	/**
+	 * When true (the default), XyCraft's JEI plugin rule maps are compacted after JEI finishes
+	 * loading. The block-state map is only an intermediate used to build the item and fluid lists,
+	 * and XyCraft never reads it back; releasing it costs nothing a player can see.
+	 */
+	public static boolean optimizeXycraft() {
+		return resolveBoolean(OPTIMIZE_XYCRAFT_PROPERTY, JeAsyncConfig.COMMON.optimizeXycraft, true);
+	}
+
+	/**
+	 * The most potion variants a Mantle display ingredient may materialise. Potion ingredients
+	 * expand to every registered potion for every potion item, which can be hundreds of thousands
+	 * of stacks on a large pack. Recipe matching is unaffected because the ingredient tests the
+	 * item and tag directly, but capping the expansion means the recipe viewer shows fewer
+	 * variants, so 0 (the default) leaves it disabled. A positive value opts into the memory
+	 * saving.
+	 */
+	public static int maxPotionDisplayStacks() {
+		String property = System.getProperty(MAX_POTION_DISPLAY_STACKS_PROPERTY);
+		if (property != null) {
+			try {
+				int parsed = Integer.parseInt(property.trim());
+				if (parsed >= 0) {
+					return parsed;
+				}
+			} catch (NumberFormatException ignored) {
+				// Fall through to the config file.
+			}
+		}
+		try {
+			return JeAsyncConfig.COMMON.maxPotionDisplayStacks.get();
+		} catch (IllegalStateException ignored) {
+			// Config is not loaded yet in a dev run; keep the lossy cap disabled by default.
+			return 0;
+		}
 	}
 
 	/**

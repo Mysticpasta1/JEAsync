@@ -3,6 +3,7 @@ package dev.jeasync.mixin.startup;
 import dev.jeasync.ClientRecipeViews;
 import dev.jeasync.compat.RecoletaHooks;
 import dev.jeasync.compat.RecipeViewerCatalogCache;
+import dev.jeasync.compat.XyCraftCaches;
 import dev.jeasync.JeiLoadProgress;
 import dev.jeasync.MixinApplied;
 import dev.jeasync.WorkerEnvironment;
@@ -405,6 +406,7 @@ public abstract class StartEventObserverMixin {
 					LOGGER.warn("jeasync: a recipe sync arrived after {} restarts and was not applied", MAX_RESTARTS);
 				}
 				RecipeViewerCatalogCache.releaseAfterLoad();
+				XyCraftCaches.release();
 				JeiLoadProgress.publish();
 				RecoletaHooks.afterJeiLoad();
 				LOGGER.info("jeasync: JEI loaded with heap {} MB used of {} MB allocated", jeasync$usedHeapMb(),
