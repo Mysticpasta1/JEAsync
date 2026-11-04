@@ -60,6 +60,7 @@ dependencies {
     minecraft "net.minecraftforge:forge:${minecraftVersion}-${project.forgeVersion}"
     implementation fg.deobf("mezz.jei:jei-${minecraftVersion}-forge:${project.jeiVersion}")
     compileOnly fg.deobf("curse.maven:jei-plus-plus-1645653:9060789")
+    compileOnly fg.deobf("curse.maven:recoleta-1533337:8178730")
     compileOnly 'org.spongepowered:mixin:0.8.5'
     annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
 }

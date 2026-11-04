@@ -1,6 +1,7 @@
 package dev.jeasync.mixin.startup;
 
 import dev.jeasync.ClientRecipeViews;
+import dev.jeasync.compat.RecoletaHooks;
 import dev.jeasync.compat.RecipeViewerCatalogCache;
 import dev.jeasync.JeiLoadProgress;
 import dev.jeasync.MixinApplied;
@@ -405,6 +406,7 @@ public abstract class StartEventObserverMixin {
 				}
 				RecipeViewerCatalogCache.releaseAfterLoad();
 				JeiLoadProgress.publish();
+				RecoletaHooks.afterJeiLoad();
 				LOGGER.info("jeasync: JEI loaded with heap {} MB used of {} MB allocated", jeasync$usedHeapMb(),
 					Runtime.getRuntime().totalMemory() >> 20);
 				return;
