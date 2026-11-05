@@ -46,6 +46,8 @@ public final class JeiLoadProgress {
 	private static volatile Thread worker;
 	private static volatile Runnable deferredGui;
 	private static volatile Method scheduleClient;
+	private static volatile Method announceMethod;
+	private static volatile long startedAtNanos;
 
 	private JeiLoadProgress() {
 	}
@@ -79,6 +81,7 @@ public final class JeiLoadProgress {
 		stopAfterLoad = false;
 		deferredGui = null;
 		stage = "Starting JEI";
+		startedAtNanos = System.nanoTime();
 		ItemSubtypeCache.clear();
 		TypedIngredientIntern.clear();
 		AnvilEnchantCache.clear();
@@ -201,7 +204,13 @@ public final class JeiLoadProgress {
 		TypedIngredientIntern.clear();
 		AnvilEnchantCache.clear();
 		JeiCaches.clearTypedItemStackCache();
-		scheduleOnClient(JeiLoadProgress::publishDeferredGui);
+		long elapsedNanos = startedAtNanos == 0L ? 0L : System.nanoTime() - startedAtNanos;
+		scheduleOnClient(() -> {
+			publishDeferredGui();
+			if (!failed()) {
+				announceLoaded(elapsedNanos);
+			}
+		});
 	}
 
 	public static void succeed() {
@@ -298,6 +307,21 @@ public final class JeiLoadProgress {
 			return stage + " (" + Math.min(done, total) + "/" + total + ")";
 		}
 		return stage;
+	}
+
+	private static void announceLoaded(long elapsedNanos) {
+		try {
+			Method announce = announceMethod;
+			if (announce == null) {
+				announce = Class.forName("dev.jeasync.client.JeiLoadNotifier")
+					.getDeclaredMethod("announceLoaded", long.class);
+				announceMethod = announce;
+			}
+			announce.invoke(null, elapsedNanos);
+		} catch (Throwable t) {
+			org.apache.logging.log4j.LogManager.getLogger(JeiLoadProgress.class)
+				.warn("jeasync: could not announce the finished load", t);
+		}
 	}
 
 	private static void scheduleOnClient(Runnable task) {

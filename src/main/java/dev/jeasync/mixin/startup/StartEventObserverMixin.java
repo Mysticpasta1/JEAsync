@@ -409,8 +409,6 @@ public abstract class StartEventObserverMixin {
 				XyCraftCaches.release();
 				JeiLoadProgress.publish();
 				RecoletaHooks.afterJeiLoad();
-				LOGGER.info("jeasync: JEI loaded with heap {} MB used of {} MB allocated", jeasync$usedHeapMb(),
-					Runtime.getRuntime().totalMemory() >> 20);
 				return;
 			}
 		} catch (Throwable t) {
