@@ -69,6 +69,8 @@ final class MixinSelfCheck {
 		// Search backend; only ever constructed on the client.
 		"mezz.jei.gui.search.ElementSearch",
 		"mezz.jei.gui.ingredients.IngredientFilter",
+		// Tooltip strings for the search index come from here, from several worker threads.
+		"mezz.jei.common.util.SafeIngredientUtil",
 		"mezz.jei.common.util.RegistryUtil",
 		"net.minecraft.client.Minecraft",
 		"mezz.jei.forge.startup.EventRegistration",

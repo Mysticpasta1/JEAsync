@@ -60,6 +60,7 @@
   "client": [
     "client.MinecraftClientAccessor",
     "client.MinecraftClientMixin",
+    "client.SafeIngredientUtilMixin",
     "collect.RegistryUtilMixin",
     "startup.StartEventObserverMixin",
     "startup.JeiStarterMixin",

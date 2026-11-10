@@ -3,11 +3,11 @@ package dev.jeasync.mixin.search;
 import dev.jeasync.DeferredSearchStorage;
 import dev.jeasync.JeiLoadProgress;
 import dev.jeasync.RuntimeIngredientUpdates;
+import dev.jeasync.SearchIndexBuild;
 import mezz.jei.api.ingredients.IIngredientHelper;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.ingredients.subtypes.UidContext;
 import mezz.jei.api.search.ISearchStorage;
-import mezz.jei.api.search.ISearchStorageBuilder;
 import mezz.jei.common.config.SearchMode;
 import mezz.jei.common.search.CombinedSearchables;
 import mezz.jei.common.search.PrefixInfo;
@@ -17,6 +17,8 @@ import mezz.jei.gui.ingredients.IListElementInfo;
 import mezz.jei.gui.search.ElementSearch;
 import mezz.jei.gui.search.ElementPrefixParser;
 import mezz.jei.gui.search.ElementSearchIndex;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Mutable;
@@ -33,10 +35,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-
-import dev.jeasync.AsyncConfig;
-import dev.jeasync.AsyncPluginSupport;
 
 /**
  * Makes {@link ElementSearch}'s lookups safe while recipes are still being registered.
@@ -51,6 +49,10 @@ import dev.jeasync.AsyncPluginSupport;
  * {@code prefixedSearchables} and swaps {@code combinedSearchables} wholesale from a config
  * listener. One monitor for the whole class is a coarse choice, but it is only contended during
  * startup and by a search in progress, and it removes any question of ordering between the two maps.
+ * <p>
+ * The index build itself no longer runs under that monitor. Each prefix is built outside the locks
+ * and only installed under them, so a search that arrives mid-build keeps reading the previous
+ * index instead of blocking until the new one is finished.
  * <p>
  * The live suffix tree has its own monitor, {@link RuntimeIngredientUpdates#SEARCH_LOCK}. A search
  * or a rebuild takes it only while it already holds {@code allElements}. A runtime insert takes it
@@ -70,6 +72,10 @@ import dev.jeasync.AsyncPluginSupport;
  */
 @Mixin(value = ElementSearch.class, remap = false)
 public abstract class ElementSearchMixin {
+	private static final Logger JEI_ASYNC_LOGGER = LogManager.getLogger(ElementSearchMixin.class);
+
+	private static final long JEI_ASYNC_TIMING_THRESHOLD_MILLIS = 25;
+
 	@Shadow
 	@Final
 	@Mutable
@@ -122,18 +128,18 @@ public abstract class ElementSearchMixin {
 	 * <p>
 	 * Overwritten rather than redirected because the 0.233+ bytecode optimizer reuses the local
 	 * slots {@code this} and the arguments live in, which a redirect would reload.
+	 *
+	 * @author Mysticpasta1
+	 * @reason Keep the deferral placeholder and route the build through the sharded builder.
 	 */
 	@Overwrite
 	private void rebuildSearchIndex(ElementSearchIndex searchIndex, Collection<IListElementInfo<?>> infos) {
 		PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo =
 			((ElementPrefixParserInvoker) (Object) this.elementPrefixParser).jeasync$invokeGetPrefixInfo(searchIndex);
-		PrefixedSearchable<IListElementInfo<?>, IListElement<?>> searchable;
-		if (JeiLoadProgress.isDeferringHeavySearch() && searchIndex != ElementSearchIndex.NAMES_AND_ALIASES) {
-			searchable = new PrefixedSearchable<>(DeferredSearchStorage.get(), prefixInfo);
-		} else {
-			searchable = createSearchable(prefixInfo, infos);
+		if (prefixInfo == null) {
+			return;
 		}
-		this.prefixedSearchables.put(prefixInfo, searchable);
+		this.prefixedSearchables.put(prefixInfo, jeiAsyncBuildIndex(searchIndex, prefixInfo, infos));
 	}
 
 	/**
@@ -154,144 +160,81 @@ public abstract class ElementSearchMixin {
 	}
 
 	/**
-	 * Upstream builds one search index per prefix, in sequence, and each one walks the whole
-	 * ingredient list. This keeps that shape but times each prefix, because the cost is very
-	 * unevenly distributed and the distribution decides whether there is anything to parallelise.
-	 * <p>
-	 * Parallelising the per-element string computation was tried and is not worth it. It runs - the
-	 * bundled benchmark spreads it over 10 to 16 threads - but the work is allocation-bound rather
-	 * than CPU-bound: {@code mod_names} alone allocates several sets, a regex matcher and a
-	 * lowercased copy per ingredient, and the resulting garbage collection does not scale. Measured
-	 * on the bundled benchmark, {@code mod_names} went from 154 ms to 140 ms, against a run-to-run
-	 * spread of more than a second. The {@code tooltips} prefix is the larger cost and is left
-	 * alone anyway: its strings come from {@code IIngredientRenderer.getTooltip}, which is plugin
-	 * code, and calling that from several threads at once is not something this add-on is prepared
-	 * to assume is safe.
-	 */
-	/**
 	 * @author Mysticpasta1
-	 * @reason Build one prefix index without sharing a mutable builder across threads.
+	 * @reason Build one prefix index with the ingredients divided over the worker pool.
 	 */
 	@Overwrite
 	private static PrefixedSearchable<IListElementInfo<?>, IListElement<?>> createSearchable(
 		PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo,
 		Collection<IListElementInfo<?>> infos
 	) {
-		SearchMode searchMode = prefixInfo.getMode();
-		if (searchMode == SearchMode.DISABLED) {
-			return new PrefixedSearchable<>(DeferredSearchStorage.get(), prefixInfo);
-		}
-		long started = System.nanoTime();
-		ISearchStorageBuilder<IListElement<?>> storageBuilder = prefixInfo.createStorageBuilder();
-		for (IListElementInfo<?> info : infos) {
-			Collection<String> strings = prefixInfo.getStrings(info);
-			IListElement<?> element = info.getElement();
-			for (String string : strings) {
-				String trimmed = string.trim();
-				if (!trimmed.isEmpty()) {
-					storageBuilder.put(trimmed, element);
-				}
-			}
-		}
-		ISearchStorage<IListElement<?>> searchStorage = storageBuilder.build();
-		long elapsed = (System.nanoTime() - started) / 1_000_000L;
-		if (elapsed >= JEI_ASYNC_TIMING_THRESHOLD_MILLIS) {
-			org.apache.logging.log4j.LogManager.getLogger(ElementSearchMixin.class)
-				.info("Search index for prefix {} took {} ms over {} ingredients", prefixInfo, elapsed, infos.size());
-		}
-		return new PrefixedSearchable<>(searchStorage, prefixInfo);
+		return SearchIndexBuild.create(prefixInfo, infos);
 	}
 
-	private static final long JEI_ASYNC_TIMING_THRESHOLD_MILLIS = 25;
+	/**
+	 * Builds one prefix, or the deferral placeholder for it.
+	 * <p>
+	 * While {@link JeiLoadProgress} is still deferring the heavy prefixes, everything except the
+	 * name index keeps the empty storage: building it here would allocate the very strings the
+	 * deferral is saving for after startup.
+	 */
+	private PrefixedSearchable<IListElementInfo<?>, IListElement<?>> jeiAsyncBuildIndex(
+		ElementSearchIndex searchIndex,
+		PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo,
+		Collection<IListElementInfo<?>> infos
+	) {
+		if (JeiLoadProgress.isDeferringHeavySearch() && searchIndex != ElementSearchIndex.NAMES_AND_ALIASES) {
+			return new PrefixedSearchable<>(DeferredSearchStorage.get(), prefixInfo);
+		}
+		return SearchIndexBuild.create(prefixInfo, infos);
+	}
 
 	/**
 	 * @author Mysticpasta1
-	 * @reason Lock the element map while rebuilding so a search does not observe a half-built index.
+	 * @reason Build every requested prefix outside the locks, then install them under it.
 	 */
 	@Overwrite
 	public void rebuildSearchIndexes(Set<ElementSearchIndex> searchIndexes, Collection<IListElementInfo<?>> infos) {
-		synchronized (allElements) {
-			synchronized (RuntimeIngredientUpdates.SEARCH_LOCK) {
-				try {
-					jeiAsyncBuildIndexes(searchIndexes, infos);
-				} finally {
-					updateCombinedSearchables();
-				}
-			}
-		}
-	}
-
-	/**
-	 * Upstream builds one search index at a time, each one walking every element, and the
-	 * post-startup fill asks for six heavy indexes at once. This builds them side by side when
-	 * the pool has threads to spare: one index per worker, each writing only its own storage
-	 * builder, and the {@code prefixedSearchables} entries land here in list order after all of
-	 * them finish, under the same lock the lookups take. An index whose strings threw keeps its
-	 * previous storage, so a plugin tooltip failure no longer takes the other prefixes down.
-	 * <p>
-	 * While {@link JeiLoadProgress} is still deferring the heavy prefixes this stays on the
-	 * sequential path: the deferral marker is a {@link ThreadLocal} that the private
-	 * {@code rebuildSearchIndex} reads, and running the extraction directly would build the very
-	 * strings the deferral is saving for after startup.
-	 */
-	private void jeiAsyncBuildIndexes(Set<ElementSearchIndex> searchIndexes, Collection<IListElementInfo<?>> infos) {
-		if (searchIndexes.size() <= 1 || AsyncConfig.getThreadCount() <= 1 || JeiLoadProgress.isDeferringHeavySearch()) {
-			for (ElementSearchIndex searchIndex : searchIndexes) {
-				rebuildSearchIndex(searchIndex, infos);
-			}
-			return;
-		}
 		long started = System.nanoTime();
 		List<ElementSearchIndex> ordered = new ArrayList<>(searchIndexes);
 		List<PrefixInfo<IListElementInfo<?>, IListElement<?>>> prefixInfos = new ArrayList<>(ordered.size());
-		List<CompletableFuture<PrefixedSearchable<IListElementInfo<?>, IListElement<?>>>> builders = new ArrayList<>(ordered.size());
-		for (ElementSearchIndex index : ordered) {
+		List<PrefixedSearchable<IListElementInfo<?>, IListElement<?>>> built = new ArrayList<>(ordered.size());
+		for (ElementSearchIndex searchIndex : ordered) {
 			PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo =
-				((ElementPrefixParserInvoker) (Object) this.elementPrefixParser).jeasync$invokeGetPrefixInfo(index);
-			if (prefixInfo == null) {
-				rebuildSearchIndex(index, infos);
-				prefixInfos.add(null);
-				builders.add(null);
-				continue;
-			}
+				((ElementPrefixParserInvoker) (Object) this.elementPrefixParser).jeasync$invokeGetPrefixInfo(searchIndex);
 			prefixInfos.add(prefixInfo);
-			CompletableFuture<PrefixedSearchable<IListElementInfo<?>, IListElement<?>>> builder;
-			if (prefixInfo.getMode() == SearchMode.DISABLED) {
-				builders.add(null);
-				prefixedSearchables.put(prefixInfo, createSearchable(prefixInfo, infos));
-				continue;
+			PrefixedSearchable<IListElementInfo<?>, IListElement<?>> searchable = null;
+			if (prefixInfo != null) {
+				try {
+					searchable = jeiAsyncBuildIndex(searchIndex, prefixInfo, infos);
+				} catch (Throwable t) {
+					// One plugin's string getter must not take the other prefixes down with it.
+					// The previous storage stays in place for this prefix.
+					JEI_ASYNC_LOGGER.warn("jeasync: search index for prefix {} was not rebuilt", prefixInfo, t);
+				}
 			}
-			builder = CompletableFuture.supplyAsync(() -> createSearchable(prefixInfo, infos), AsyncPluginSupport.getExecutor());
-			builders.add(builder);
+			built.add(searchable);
 		}
-		for (int slot = 0; slot < ordered.size(); slot++) {
-			jeiAsyncInstall(prefixInfos.get(slot), builders.get(slot));
+
+		synchronized (allElements) {
+			synchronized (RuntimeIngredientUpdates.SEARCH_LOCK) {
+				for (int slot = 0; slot < ordered.size(); slot++) {
+					PrefixedSearchable<IListElementInfo<?>, IListElement<?>> searchable = built.get(slot);
+					if (searchable != null) {
+						prefixedSearchables.put(prefixInfos.get(slot), searchable);
+					}
+				}
+				updateCombinedSearchables();
+			}
 		}
+
 		long elapsed = (System.nanoTime() - started) / 1_000_000L;
 		if (elapsed >= JEI_ASYNC_TIMING_THRESHOLD_MILLIS) {
-			org.apache.logging.log4j.LogManager.getLogger(ElementSearchMixin.class)
-				.info("Search indexes for {} prefixes built in {} ms over {} ingredients (parallel)",
-					ordered.size(), elapsed, infos.size());
+			JEI_ASYNC_LOGGER.info(
+				"Search indexes for {} prefixes built in {} ms over {} ingredients (ingredients divided across workers)",
+				ordered.size(), elapsed, infos.size()
+			);
 		}
-	}
-
-	private void jeiAsyncInstall(
-		PrefixInfo<IListElementInfo<?>, IListElement<?>> prefixInfo,
-		CompletableFuture<PrefixedSearchable<IListElementInfo<?>, IListElement<?>>> builder
-	) {
-		if (prefixInfo == null || builder == null) {
-			return;
-		}
-		PrefixedSearchable<IListElementInfo<?>, IListElement<?>> searchable;
-		try {
-			searchable = builder.join();
-		} catch (Throwable t) {
-			Throwable cause = t.getCause() != null ? t.getCause() : t;
-			org.apache.logging.log4j.LogManager.getLogger(ElementSearchMixin.class)
-				.warn("jeasync: search index for prefix {} was not rebuilt", prefixInfo, cause);
-			return;
-		}
-		prefixedSearchables.put(prefixInfo, searchable);
 	}
 
 	/**

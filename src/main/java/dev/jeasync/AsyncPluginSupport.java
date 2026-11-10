@@ -30,6 +30,7 @@ public final class AsyncPluginSupport {
 
     private static volatile ExecutorService executor;
     private static volatile ExecutorService startupExecutor;
+    private static volatile ExecutorService searchBuildExecutor;
 
     private AsyncPluginSupport() {
     }
@@ -118,6 +119,36 @@ public final class AsyncPluginSupport {
     }
 
     /**
+     * Pool for building JEI's search indexes.
+     * <p>
+     * Separate from {@link #getExecutor()} on purpose. An index build divides its ingredients over
+     * this pool and the submitting thread waits for the shards. If that thread is itself a plugin
+     * pool worker - the config-change path already runs there - waiting on the same pool can
+     * starve it, because the queued shards never get a thread. Shard tasks here never wait on this
+     * pool, so a build can safely block its caller.
+     */
+    public static ExecutorService getSearchBuildExecutor() {
+        ExecutorService current = searchBuildExecutor;
+        if (current != null && !current.isShutdown()) {
+            return current;
+        }
+        synchronized (AsyncPluginSupport.class) {
+            current = searchBuildExecutor;
+            if (current == null || current.isShutdown()) {
+                WorkerEnvironment.capture();
+                ContextExecutor pool = new ContextExecutor(
+                        AsyncConfig.getThreadCount(),
+                        workerFactory("jeasync Search Build"));
+                // Let the pool shrink back to zero between index builds.
+                pool.allowCoreThreadTimeOut(true);
+                searchBuildExecutor = pool;
+                current = pool;
+            }
+            return current;
+        }
+    }
+
+    /**
      * Whether this plugin's registration callback may run on a worker.
      * <p>
      * A plugin already recorded as incompatible stays out of the worker pool. That check comes
@@ -155,15 +186,19 @@ public final class AsyncPluginSupport {
     public static void shutdown() {
         ExecutorService current;
         ExecutorService currentStartup;
+        ExecutorService currentSearchBuild;
         synchronized (AsyncPluginSupport.class) {
             current = executor;
             executor = null;
             currentStartup = startupExecutor;
             startupExecutor = null;
+            currentSearchBuild = searchBuildExecutor;
+            searchBuildExecutor = null;
         }
         INCOMPATIBLE.clear();
         shutdown(current, "plugin loader");
         shutdown(currentStartup, "startup");
+        shutdown(currentSearchBuild, "search build");
     }
 
     private static void shutdown(ExecutorService service, String what) {
