@@ -30,6 +30,7 @@ public final class JeAsyncConfig {
 
 	public static class Common {
 		public final ForgeConfigSpec.IntValue threads;
+		public final ForgeConfigSpec.IntValue stallReportSeconds;
 		public final ForgeConfigSpec.BooleanValue deferFocusLinks;
 		public final ForgeConfigSpec.BooleanValue skipAnvilEnchantRecipes;
 		public final ForgeConfigSpec.BooleanValue skipAnvilRepairRecipes;
@@ -45,6 +46,17 @@ public final class JeAsyncConfig {
 			threads = builder
 				.comment("Worker threads. 0 uses the processor count, and at least 2.")
 				.defineInRange("threads", 0, 0, 256);
+
+			stallReportSeconds = builder
+				.comment(
+					"Plugin stall detection. After this many seconds, a plugin callback that is still",
+					"running is logged with its worker thread's stack, a full thread dump and any JVM",
+					"monitor deadlock. This only diagnoses a stall: the callback is never",
+					"interrupted, failed, skipped or moved to another thread. 0 disables the feature",
+					"entirely: no watchdog thread is created and no callback tracking runs.",
+					"A stuck callback is reported again at the same interval."
+				)
+				.defineInRange("stallReportSeconds", AsyncConfig.DEFAULT_STALL_REPORT_SECONDS, 0, 86400);
 
 			deferFocusLinks = builder
 				.comment(

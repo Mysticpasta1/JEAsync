@@ -14,6 +14,7 @@ import net.minecraftforge.common.ForgeConfigSpec;
  */
 public final class AsyncConfig {
 	private static final String THREADS_PROPERTY = "jeasync.threads";
+	private static final String STALL_REPORT_SECONDS_PROPERTY = "jeasync.stallReportSeconds";
 	private static final String DEFER_FOCUS_LINKS_PROPERTY = "jeasync.deferFocusLinks";
 	private static final String SKIP_ANVIL_ENCHANT_RECIPES_PROPERTY = "jeasync.skipAnvilEnchantRecipes";
 	private static final String SKIP_ANVIL_REPAIR_RECIPES_PROPERTY = "jeasync.skipAnvilRepairRecipes";
@@ -24,6 +25,9 @@ public final class AsyncConfig {
 	private static final String OPTIMIZE_XYCRAFT_PROPERTY = "jeasync.optimizeXycraft";
 	private static final String MAX_POTION_DISPLAY_STACKS_PROPERTY = "jeasync.maxPotionDisplayStacks";
 	private static final String SKIPPED_CATEGORIES_PROPERTY = "jeasync.skippedCategories";
+
+	/** Seconds a plugin callback may run before the stall watchdog reports it. 0 disables it. */
+	public static final int DEFAULT_STALL_REPORT_SECONDS = 120;
 
 	/**
 	 * Serializer ids whose recipes are dropped from JEI's recipe tables entirely. Empty by default:
@@ -74,6 +78,30 @@ public final class AsyncConfig {
 			return Math.max(2, Runtime.getRuntime().availableProcessors());
 		}
 		return configured;
+	}
+
+	/**
+	 * Seconds a plugin callback may run before the stall watchdog reports it. 0 disables the
+	 * watchdog. A {@code -Djeasync.stallReportSeconds} property wins over the config file.
+	 */
+	public static int stallReportSeconds() {
+		String property = System.getProperty(STALL_REPORT_SECONDS_PROPERTY);
+		if (property != null) {
+			try {
+				int parsed = Integer.parseInt(property.trim());
+				if (parsed >= 0) {
+					return parsed;
+				}
+			} catch (NumberFormatException ignored) {
+				// Fall through to the config file.
+			}
+		}
+		try {
+			return JeAsyncConfig.COMMON.stallReportSeconds.get();
+		} catch (IllegalStateException ignored) {
+			// Config is not loaded yet in a dev run; keep the default.
+			return DEFAULT_STALL_REPORT_SECONDS;
+		}
 	}
 
 	/**

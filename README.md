@@ -385,12 +385,13 @@ build, so the strings are collected while the index grows rather than all at onc
 ## Configuration
 
 `config/jeasync-client.toml`, written on first launch. Registration itself is not a setting.
-Every plugin runs off the render thread. The file has the thread count and the memory levers, and
-each comment in the file says what it does.
+Every plugin runs off the render thread. The file has the thread count, stall detection and the
+memory levers, and each comment in the file says what it does.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
 | `threads` | `0` | Worker pool size. `0` uses the processor count, and at least 2 |
+| `stallReportSeconds` | `120` | After this many seconds, a still-running plugin callback is logged with its worker thread's stack, a full thread dump and any JVM monitor deadlock, repeating at the same interval while it stays stuck. Diagnostics only: nothing is interrupted, failed or skipped. `0` disables the feature entirely; no watchdog thread is created and no callback tracking runs |
 | `deferFocusLinks` | `true` | Build each recipe's focus links at its first visibility query instead of at registration. Unqueried recipes hold nothing |
 | `skipAnvilEnchantRecipes` | `true` | Skip JEI's anvil book-enchantment recipes, the ingredient x enchantment x level cross product. See [The grindstone memory explosion](#the-grindstone-memory-explosion) |
 | `skipAnvilRepairRecipes` | `true` | Skip the small anvil repair-recipe list. The anvil keeps it when this is off |
@@ -410,6 +411,7 @@ A `-Djeasync.*` property wins over the file:
 | Property | Overrides |
 | --- | --- |
 | `-Djeasync.threads=N` | `threads` |
+| `-Djeasync.stallReportSeconds=N` | `stallReportSeconds` |
 | `-Djeasync.deferFocusLinks=true/false` | `deferFocusLinks` |
 | `-Djeasync.skipAnvilEnchantRecipes=true/false` | `skipAnvilEnchantRecipes` |
 | `-Djeasync.skipAnvilRepairRecipes=true/false` | `skipAnvilRepairRecipes` |

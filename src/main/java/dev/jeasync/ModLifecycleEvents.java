@@ -39,8 +39,9 @@ final class ModLifecycleEvents {
 				return;
 			}
 			LOGGER.info(
-				"[async-diag] effective settings: threads={} skippedRecipeSerializers={} dedupRecipeSerializers={} skippedCategories={} optimizeXycraft={} maxPotionDisplayStacks={}",
+				"[async-diag] effective settings: threads={} stallReportSeconds={} skippedRecipeSerializers={} dedupRecipeSerializers={} skippedCategories={} optimizeXycraft={} maxPotionDisplayStacks={}",
 				AsyncConfig.getThreadCount(),
+				AsyncConfig.stallReportSeconds(),
 				AsyncConfig.skippedRecipeSerializers(),
 				AsyncConfig.dedupRecipeSerializers(),
 				AsyncConfig.skippedCategories(),

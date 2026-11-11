@@ -4,6 +4,7 @@ import com.google.common.base.Stopwatch;
 import dev.jeasync.AsyncPluginSupport;
 import dev.jeasync.compat.RecipeViewerCatalogCache;
 import dev.jeasync.JeiLoadProgress;
+import dev.jeasync.PluginStallWatchdog;
 import dev.jeasync.RegistryFreeze;
 import dev.jeasync.RenderThreadGuard;
 import dev.jeasync.WorkerEnvironment;
@@ -123,57 +124,64 @@ public abstract class PluginCallerMixin {
 		RecipeViewerCatalogCache.remember(plugins);
 		Stopwatch stopwatch = Stopwatch.createStarted();
 		JeiLoadProgress.beginStage(title, plugins.size());
+		PluginStallWatchdog.Watch watch = PluginStallWatchdog.begin(title);
 
-		List<CompletableFuture<Void>> pending = new ArrayList<>();
-		List<IModPlugin> inline = new ArrayList<>();
-		List<IModPlugin> retry = Collections.synchronizedList(new ArrayList<>());
+		try {
+			List<CompletableFuture<Void>> pending = new ArrayList<>();
+			List<IModPlugin> inline = new ArrayList<>();
+			List<IModPlugin> retry = Collections.synchronizedList(new ArrayList<>());
 
-		for (IModPlugin plugin : plugins) {
-			if (needsInline(plugin)) {
-				inline.add(plugin);
-			} else {
-				pending.add(dispatchAsync(title, plugin, func, retry));
-			}
-		}
-
-		if (!pending.isEmpty()) {
-			try {
-				CompletableFuture.allOf(pending.toArray(new CompletableFuture[0])).join();
-			} catch (CompletionException e) {
-				JEI_ASYNC_LOGGER.warn("One or more async plugins failed during {} (already handled)", title);
-			}
-			retryFailed(title, retry, func);
-		}
-
-		// Inline work waits until the workers for this phase have joined, then runs on the client
-		// thread. The startup thread is not the render thread.
-		try (PluginCallerTimer timer = new PluginCallerTimer()) {
-			for (IModPlugin plugin : inline) {
-				boolean after = runsAfterWorkers(plugin);
-				ResourceLocation pluginUid = plugin.getPluginUid();
-				Stopwatch pluginWatch = after ? Stopwatch.createStarted() : null;
-				if (after) {
-					JEI_ASYNC_LOGGER.info("Plugin {} is running after the other plugins for {}", pluginUid, title);
-				}
-				boolean ok = runOnClientThread(plugin, func, title, after ? null : timer, true);
-				if (after && ok) {
-					JEI_ASYNC_LOGGER.info("Plugin {} registered during {} in {}", pluginUid, title, pluginWatch);
+			for (IModPlugin plugin : plugins) {
+				if (needsInline(plugin)) {
+					inline.add(plugin);
+				} else {
+					watch.dispatched(plugin);
+					pending.add(dispatchAsync(title, plugin, func, retry, watch));
 				}
 			}
-		}
 
-		// Summarise any plugins that failed during this phase so the failure is not
-		// buried among tens of thousands of log lines.
-		List<String> failedPlugins = new ArrayList<>();
-		for (IModPlugin p : plugins) {
-			if (AsyncPluginSupport.isIncompatible(p)) {
-				failedPlugins.add(String.valueOf(p.getPluginUid()));
+			if (!pending.isEmpty()) {
+				try {
+					CompletableFuture.allOf(pending.toArray(new CompletableFuture[0])).join();
+				} catch (CompletionException e) {
+					JEI_ASYNC_LOGGER.warn("One or more async plugins failed during {} (already handled)", title);
+				}
+				retryFailed(title, retry, func, watch);
 			}
+
+			// Inline work waits until the workers for this phase have joined, then runs on the client
+			// thread. The startup thread is not the render thread.
+			try (PluginCallerTimer timer = new PluginCallerTimer()) {
+				for (IModPlugin plugin : inline) {
+					boolean after = runsAfterWorkers(plugin);
+					ResourceLocation pluginUid = plugin.getPluginUid();
+					Stopwatch pluginWatch = after ? Stopwatch.createStarted() : null;
+					if (after) {
+						JEI_ASYNC_LOGGER.info("Plugin {} is running after the other plugins for {}", pluginUid, title);
+					}
+					watch.dispatched(plugin);
+					boolean ok = runOnClientThread(plugin, func, title, after ? null : timer, true, watch);
+					if (after && ok) {
+						JEI_ASYNC_LOGGER.info("Plugin {} registered during {} in {}", pluginUid, title, pluginWatch);
+					}
+				}
+			}
+
+			// Summarise any plugins that failed during this phase so the failure is not
+			// buried among tens of thousands of log lines.
+			List<String> failedPlugins = new ArrayList<>();
+			for (IModPlugin p : plugins) {
+				if (AsyncPluginSupport.isIncompatible(p)) {
+					failedPlugins.add(String.valueOf(p.getPluginUid()));
+				}
+			}
+			if (!failedPlugins.isEmpty()) {
+				JEI_ASYNC_LOGGER.error("jeasync: {} plugin(s) failed during {} and were skipped: {}", failedPlugins.size(), title, failedPlugins);
+			}
+			JEI_ASYNC_LOGGER.info("{} took {} ({} inline, {} async)", title, stopwatch, inline.size(), pending.size());
+		} finally {
+			watch.close();
 		}
-		if (!failedPlugins.isEmpty()) {
-			JEI_ASYNC_LOGGER.error("jeasync: {} plugin(s) failed during {} and were skipped: {}", failedPlugins.size(), title, failedPlugins);
-		}
-		JEI_ASYNC_LOGGER.info("{} took {} ({} inline, {} async)", title, stopwatch, inline.size(), pending.size());
 	}
 
 	/**
@@ -199,10 +207,11 @@ public abstract class PluginCallerMixin {
 		JEI_ASYNC_LOGGER.info("{} took {} ({} inline, 0 async)", title, stopwatch, plugins.size());
 	}
 
-	private static CompletableFuture<Void> dispatchAsync(String title, IModPlugin plugin, Consumer<IModPlugin> func, List<IModPlugin> retry) {
+	private static CompletableFuture<Void> dispatchAsync(String title, IModPlugin plugin, Consumer<IModPlugin> func, List<IModPlugin> retry, PluginStallWatchdog.Watch watch) {
 		return CompletableFuture.runAsync(() -> WorkerEnvironment.runRegistration(() -> {
 			ResourceLocation pluginUid = plugin.getPluginUid();
 			Stopwatch stopwatch = Stopwatch.createStarted();
+			watch.started(plugin, Thread.currentThread());
 			try {
 				RenderThreadGuard.enterPluginRegistration();
 				try {
@@ -224,6 +233,7 @@ public abstract class PluginCallerMixin {
 				String where = again ? " (running it on " + retryThread() + " instead)" : "";
 				JEI_ASYNC_LOGGER.error("Caught an error from mod plugin off-thread: {} {}{}", plugin.getClass(), pluginUid, where, e);
 			} finally {
+				watch.finished(plugin);
 				JeiLoadProgress.pluginFinished();
 			}
 		}), AsyncPluginSupport.getExecutor());
@@ -234,7 +244,7 @@ public abstract class PluginCallerMixin {
 	 * the client thread. Progress was already counted. Plugins demoted by an earlier phase are
 	 * in the inline list and run on the client thread after this, so they are not in {@code retry}.
 	 */
-	private static void retryFailed(String title, List<IModPlugin> retry, Consumer<IModPlugin> func) {
+	private static void retryFailed(String title, List<IModPlugin> retry, Consumer<IModPlugin> func, PluginStallWatchdog.Watch watch) {
 		if (retry.isEmpty()) {
 			return;
 		}
@@ -242,7 +252,8 @@ public abstract class PluginCallerMixin {
 		JEI_ASYNC_LOGGER.warn("Re-running {} plugin(s) on {} for {}...", failed.size(), retryThread(), title);
 		for (IModPlugin plugin : failed) {
 			try {
-				boolean ok = runOnClientThread(plugin, func, title, null, false);
+				watch.dispatched(plugin);
+				boolean ok = runOnClientThread(plugin, func, title, null, false, watch);
 				if (!ok && !AsyncPluginSupport.isIncompatible(plugin)) {
 					AsyncPluginSupport.markIncompatible(plugin, title);
 				}
@@ -378,9 +389,16 @@ public abstract class PluginCallerMixin {
 	 * while startup owns the load, and the phase's workers have already been joined. Inline plugins
 	 * use this only after that join.
 	 */
-	private static boolean runOnClientThread(IModPlugin plugin, Consumer<IModPlugin> func, String title, PluginCallerTimer timer, boolean trackProgress) {
+	private static boolean runOnClientThread(IModPlugin plugin, Consumer<IModPlugin> func, String title, PluginCallerTimer timer, boolean trackProgress, PluginStallWatchdog.Watch watch) {
 		boolean[] ran = {false};
-		WorkerEnvironment.runOnClient(() -> ran[0] = runInline(plugin, func, title, timer, trackProgress));
+		WorkerEnvironment.runOnClient(() -> {
+			watch.started(plugin, Thread.currentThread());
+			try {
+				ran[0] = runInline(plugin, func, title, timer, trackProgress);
+			} finally {
+				watch.finished(plugin);
+			}
+		});
 		return ran[0];
 	}
 
