@@ -6,8 +6,8 @@ import java.util.List;
 import net.minecraftforge.common.ForgeConfigSpec;
 
 /**
- * Effective settings. A {@code -Djeasync.*} property wins over {@link JeAsyncConfig} so a benchmark
- * run is not overridden by a config file.
+ * Effective settings. A {@code -Djeasync.*} property wins over {@link JeAsyncConfig} so a
+ * command-line override is not overridden by a config file.
  * <p>
  * Read on every call. Forge loads the file after mixins may already have initialized this class, so
  * a value captured in a static final would stay at the spec default for the session.

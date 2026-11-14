@@ -14,15 +14,14 @@ patches it at runtime with mixins.
 
 ## Performance, measured
 
-**Every plugin is dispatched off the main thread.** There is no opt-in step. A plugin that throws
-is demoted and re-run on the client thread.
+**Every plugin phase at startup is dispatched off the main thread.** There is no opt-in step. A
+plugin that throws is demoted and re-run on the client thread.
 The stock-modpack case is the fast case.
 
 **The table below is a historical measurement**, taken against JEI 15.71 when the off switches
 still existed. Those switches are gone: every plugin is dispatched, vanilla included. Client dev
-environment, one local server, same world, same machine, against the `benchmarkJar` whose 65
-synthetic plugins include 30 that opted in and 30 that declared themselves main-thread-only. Six
-runs per arm, alternating between arms so that drift in the machine's load hits every arm equally:
+environment, one local server, same world, same machine, with a synthetic plugin set. Six runs per
+arm, alternating between arms so that drift in the machine's load hits every arm equally:
 
 | Configuration | `Starting JEI took` median | Range | `Registering recipes` median |
 | --- | --- | --- | --- |
@@ -37,8 +36,8 @@ eighteen runs, so nothing was lost in any of them.
 **The recipes phase is the signal to read, not the total.** It is 1.897 s upstream, 1.305 s with
 vanilla left inline (-31%) and 837 ms by default (-56%). The totals move less because the rest of
 startup is not parallelisable - see the phase breakdown below. The spread on the totals is also
-wider than the spread on the phase: a single run of this benchmark varies by more than a second on
-an otherwise idle machine, which is why the numbers are medians of six rather than single runs.
+wider than the spread on the phase: a single run varies by more than a second on an otherwise idle
+machine, which is why the numbers are medians of six rather than single runs.
 
 An earlier version of this README quoted **-29%**. That figure has been withdrawn: it was taken
 while the mixins were not being applied at all, so both sides of the comparison were the same
@@ -81,9 +80,7 @@ ceiling is why dispatching the eligible plugins earlier could not be shown to he
 
 Reproduce with `./gradlew runServer` in one terminal and
 `./gradlew runClient -PquickPlayServer=127.0.0.1:25565` in another; JEI logs per-phase timings and
-this add-on logs the inline/async split per phase. `tools/benchmark.ps1` drives the whole thing -
-server, then the arms in rotation, then the medians - so the numbers above can be re-taken rather
-than taken on trust.
+this add-on logs the inline/async split per phase.
 
 
 ### Search-index construction, independent of the pool
@@ -94,8 +91,8 @@ than the render thread, so it no longer freezes the client while it happens. **T
 rather than reducing total time** - the same CPU is still spent, just not during a frame.
 
 The add-on logs the cost per prefix, because the distribution is uneven and the distribution
-decides whether there is anything left to win. On the bundled benchmark (5527 ingredients, default
-config, so four of the seven prefixes are active):
+decides whether there is anything left to win. On a 5527-ingredient instance (default config, so
+four of the seven prefixes are active):
 
 | Prefix | Cost | Of which: computing strings | Of which: inserting |
 | --- | --- | --- | --- |
@@ -166,6 +163,12 @@ finished. That matters because JEI reads registration state immediately afterwar
 early while workers were still writing would produce a half-built runtime that fails later and
 further from the cause. The win is that plugins register alongside each other rather than one
 after another.
+
+`Sending Runtime Unavailable` is the one phase that is not a registration. It is JEI's shutdown
+callback, invoked on the render thread while the client is logging out, and its plugins unregister
+Forge event listeners and drop client-side state. It runs sequentially on the client thread, with
+upstream's ordering and error handling. Dispatching it to workers races the event bus and leaves
+the plugin runtime half torn down at the exact moment the client reverts its registries.
 
 ### The fallback
 
@@ -385,8 +388,9 @@ build, so the strings are collected while the index grows rather than all at onc
 ## Configuration
 
 `config/jeasync-client.toml`, written on first launch. Registration itself is not a setting.
-Every plugin runs off the render thread. The file has the thread count, stall detection and the
-memory levers, and each comment in the file says what it does.
+Every plugin registration phase runs off the render thread; JEI's shutdown callback runs on the
+client thread. The file has the thread count, stall detection and the memory levers, and each
+comment in the file says what it does.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -435,8 +439,8 @@ phase from 1.305 s with vanilla inline to 837 ms.
 
 Other plugins therefore run while JEI is half-registered. A plugin that depends on vanilla state is
 supposed to throw, and the fallback re-runs it inline and then keeps it there. A plugin that reads
-half-built state without throwing is not caught. The bundled benchmark cannot test that case,
-because its plugins are synthetic sleepers.
+half-built state without throwing is not caught. Synthetic plugins that only sleep cannot test that
+case.
 
 
 ## Building
@@ -448,26 +452,6 @@ because its plugins are synthetic sleepers.
 `./gradlew runClient` and `./gradlew runServer` launch a dev environment. JEI is declared with
 ForgeGradle's `fg.deobf`, because the published JEI jar is compiled against SRG while dev runs use
 Mojang mappings.
-
-### The benchmark plugins never ship
-
-The synthetic plugins used to measure startup (`loadtest.*`, 60 of them) live in the main source
-set, because that is where Forge's annotation processor has to see them for the annotation scan
-data to be generated. The shipping jar excludes them.
-
-That exclusion is verified rather than trusted, because the failure mode is quiet. JEI finds
-plugins through Forge's annotation scan data rather than by looking for classes on the classpath, so
-a leftover scan-data entry naming a class that is no longer in the jar would make JEI try to load
-it - a startup error at best, and at worst a plugin that half-registers. `verifyNoBenchmarkPlugins`
-therefore opens the built jar and scans every class file for the benchmark package name, which
-appears in the constant pool of anything that mentions it. Any hit fails the build, and the task
-runs as part of `check`.
-
-The check has been tested against a deliberately broken jar - removing the exclusion and rebuilding
-makes it fail with the offending entries named - so it is known to be able to fail.
-
-The dev runs use a separate `benchmarkJar` artifact, which keeps the synthetic plugins so there is
-something to measure. It is never published; only `jar` is.
 
 
 ## Mixin self-check

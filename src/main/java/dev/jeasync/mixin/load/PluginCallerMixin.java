@@ -31,12 +31,15 @@ import java.util.concurrent.CompletionException;
 import java.util.function.Consumer;
 
 /**
- * Runs each plugin phase across the worker pool.
+ * Runs each plugin registration phase across the worker pool.
  * <p>
  * The phase itself still finishes before JEI continues: the next phase reads what this one
  * registered. That wait is on the startup thread. The render thread is not in it, so a container
  * opened mid-load is handled by {@link dev.jeasync.mixin.startup.StartEventObserverMixin} and
  * {@link dev.jeasync.client.JeiLoadOverlay}.
+ * <p>
+ * {@code Sending Runtime Unavailable} is JEI's shutdown callback, not a registration, and runs on
+ * the client thread. See the notes on that phase below.
  * <p>
  * This stays a head injection, at low priority, so other add-ons that also inject here still run.
  * Cancelling skips JEI's own loop. Overwriting the method would delete their injectors.
@@ -66,6 +69,16 @@ import java.util.function.Consumer;
  * no plugin's name is a usable test for whether it needs the restore. It costs nothing when the
  * manager already holds the sync, so every phase pays it.
  * <p>
+ * {@code Sending Runtime Unavailable} is not a registration phase. It is JEI's shutdown callback,
+ * invoked by {@code ClientPlayerNetworkEvent.LoggingOut} on the render thread immediately before
+ * Forge reverts the client registries with {@code GameData.revertToFrozen}. The callbacks
+ * unregister Forge event listeners and drop client-side state, which is only safe on the thread
+ * that owns the event bus and the registries. Dispatching them to workers races
+ * {@code ListenerList} against its own resize and leaves plugins half-unregistered, and the
+ * disconnect then proceeds to the registry revert with that damage in place. This runs the phase
+ * on the client thread instead, sequentially, with the same order and error handling upstream
+ * uses.
+ * <p>
  * {@code Sending ConfigManager} runs from {@code JeiStarter}'s constructor, on a mod-loading
  * worker, while other workers are still registering blocks and items. Fanning that phase out
  * reads {@code ForgeRegistry}'s maps during those writes, and the maps drop entries that were
@@ -84,13 +97,41 @@ import java.util.function.Consumer;
 @Mixin(value = mezz.jei.library.load.PluginCaller.class, remap = false, priority = 0)
 public abstract class PluginCallerMixin {
 	private static final Logger JEI_ASYNC_LOGGER = LogManager.getLogger();
+	private static final String RUNTIME_UNAVAILABLE_PHASE = "Sending Runtime Unavailable";
 	private static volatile Method jeiAsyncRestoreRecipes;
 
 	@Inject(method = "callOnPlugins", at = @At("HEAD"), cancellable = true, remap = false)
 	private static void jeiAsyncCallOnPlugins(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func, CallbackInfo ci) {
 		dev.jeasync.MixinApplied.mark("load.PluginCallerMixin");
 		ci.cancel();
+		if (RUNTIME_UNAVAILABLE_PHASE.equals(title)) {
+			dispatchRuntimeUnavailable(title, plugins, func);
+			return;
+		}
 		callOnPluginsAsync(title, plugins, func);
+	}
+
+	/**
+	 * Runs JEI's shutdown callback on the client thread, in the order and with the error handling
+	 * upstream uses.
+	 * <p>
+	 * The call usually arrives on the render thread already, and {@link WorkerEnvironment#runOnClient}
+	 * runs inline there. It only moves when a disconnect during startup reaches this from
+	 * {@code JeiStarter.stop} on the startup worker; the plugin callbacks still belong on the
+	 * thread that owns the event bus.
+	 */
+	private static void dispatchRuntimeUnavailable(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func) {
+		JEI_ASYNC_LOGGER.info("{}...", title);
+		JEI_ASYNC_LOGGER.info("jeasync: {} runs on the client thread because JEI is shutting down", title);
+		WorkerEnvironment.runOnClient(() -> {
+			Stopwatch stopwatch = Stopwatch.createStarted();
+			try (PluginCallerTimer timer = new PluginCallerTimer()) {
+				for (IModPlugin plugin : plugins) {
+					runInline(plugin, func, title, timer, false);
+				}
+			}
+			JEI_ASYNC_LOGGER.info("{} took {} ({} inline, 0 async)", title, stopwatch, plugins.size());
+		});
 	}
 
 	private static void callOnPluginsAsync(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func) {

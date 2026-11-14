@@ -101,69 +101,12 @@ def modManifestAttributes = [
 ]
 
 tasks.named('jar', Jar) {
-    exclude 'loadtest/**'
     manifest {
         attributes(modManifestAttributes)
     }
 }
 
-tasks.register('verifyNoBenchmarkPlugins') {
-    dependsOn tasks.named('jar')
-    doLast {
-        def jarFile = tasks.named('jar').get().archiveFile.get().asFile
-        def problems = []
-        def zip = new java.util.zip.ZipFile(jarFile)
-        try {
-            zip.entries().each { entry ->
-                if (entry.name.startsWith('loadtest/')) {
-                    problems << "contains ${entry.name}"
-                } else if (entry.name.endsWith('.class')) {
-                    def bytes = zip.getInputStream(entry).withCloseable { it.bytes }
-                    if (new String(bytes, 'ISO-8859-1').contains('loadtest/')) {
-                        problems << "${entry.name} references the loadtest package"
-                    }
-                }
-            }
-        } finally {
-            zip.close()
-        }
-        if (!problems.isEmpty()) {
-            throw new GradleException(
-                "The shipping jar contains benchmark plugin material: ${problems.join('; ')}.")
-        }
-        logger.lifecycle("Shipping jar is free of benchmark plugins.")
-    }
-}
-
-tasks.named('check') {
-    dependsOn tasks.named('verifyNoBenchmarkPlugins')
-}
-
-tasks.register('benchmarkJar', Jar) {
-    archiveClassifier = 'benchmark'
-    from sourceSets.main.output
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    manifest {
-        attributes(modManifestAttributes)
-    }
-}
-
-tasks.matching { it.name == 'runClient' }.configureEach { dependsOn 'deployBenchmarkJarClient' }
-tasks.matching { it.name == 'runServer' }.configureEach { dependsOn 'deployBenchmarkJarServer' }
-
-tasks.register('deployBenchmarkJarClient', Copy) {
-    dependsOn 'benchmarkJar'
-    from tasks.named('benchmarkJar')
-    into layout.projectDirectory.dir('run/client/mods')
-}
-
-tasks.register('deployBenchmarkJarServer', Copy) {
-    dependsOn 'benchmarkJar'
-    from tasks.named('benchmarkJar')
-    into layout.projectDirectory.dir('run/server/mods')
-}
-
-def forwardedProperties = ['jeasync.threads', 'loadtest.workMs', 'loadtest.ingredients', 'loadtest.ingredientBlocks']
+def forwardedProperties = ['jeasync.threads']
 
 minecraft {
     runs {
