@@ -207,6 +207,7 @@ public final class WorkerEnvironment {
 	 */
 	public static void releaseClientHandles() {
 		clientSnapshot = null;
+		REGISTRATION_HANDLES.remove();
 	}
 
 	/**
