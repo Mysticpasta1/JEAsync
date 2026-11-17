@@ -199,6 +199,7 @@ public final class JeiLoadProgress {
 	 * instead of the in-load flag.
 	 */
 	public static void publish() {
+		WorkerEnvironment.releaseClientHandles();
 		loading = false;
 		failed = false;
 		TypedIngredientIntern.clear();
@@ -220,6 +221,7 @@ public final class JeiLoadProgress {
 
 	/** Startup was abandoned. Hides the bar and does not attach the GUI. */
 	public static void finish() {
+		WorkerEnvironment.releaseClientHandles();
 		loading = false;
 		failed = false;
 		guiReady = false;
@@ -231,6 +233,7 @@ public final class JeiLoadProgress {
 	}
 
 	public static void fail(String message) {
+		WorkerEnvironment.releaseClientHandles();
 		failure = message;
 		failed = true;
 		loading = false;

@@ -201,6 +201,15 @@ public final class WorkerEnvironment {
 	}
 
 	/**
+	 * Drops the client handles taken for a registration pass. The level and player in the snapshot
+	 * belong to the world that pass ran in; keeping them after it ends pins that world's level,
+	 * player, and anything they own for the rest of the session.
+	 */
+	public static void releaseClientHandles() {
+		clientSnapshot = null;
+	}
+
+	/**
 	 * Level captured on the game thread before the worker began. Used as a fallback when a
 	 * registration handle is not installed on the current thread.
 	 */
