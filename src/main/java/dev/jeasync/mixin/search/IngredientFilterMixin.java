@@ -5,6 +5,7 @@ import dev.jeasync.AsyncSearchCoordinator;
 import dev.jeasync.FilterWork;
 import dev.jeasync.JeiLoadProgress;
 import dev.jeasync.RuntimeIngredientUpdates;
+import dev.jeasync.compat.RecoletaHooks;
 import mezz.jei.api.helpers.IModIdHelper;
 import mezz.jei.api.ingredients.IIngredientHelper;
 import mezz.jei.api.ingredients.ITypedIngredient;
@@ -371,6 +372,7 @@ public abstract class IngredientFilterMixin {
 				coordinator.invalidate();
 				jeiAsyncScheduleElements();
 				notifyListenersOfChange();
+				RecoletaHooks.afterResourceReload();
 			}
 		);
 	}
