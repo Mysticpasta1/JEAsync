@@ -25,7 +25,7 @@ import java.util.Optional;
  * <p>
  * Lookups return a snapshot taken under the lock. The uid computation stays outside it.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(targets = "mezz.jei.library.ingredients.RegisteredIngredientIndex", remap = false)
 public abstract class RegisteredIngredientIndexMixin<T> {

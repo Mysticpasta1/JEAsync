@@ -31,7 +31,7 @@ import java.util.Set;
  * <p>
  * The other two sets are replaced as well so every access through this class has the same rules.
  * <p>
- * Targets upstream 15.74.0.234.
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(value = SafeIngredientUtil.class, remap = false)
 public abstract class SafeIngredientUtilMixin {

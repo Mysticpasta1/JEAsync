@@ -1,9 +1,12 @@
 package dev.jeasync.compat;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.WeakHashMap;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -18,8 +21,8 @@ import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.VarInsnNode;
 
 /**
- * JEI 0.233 and 0.234 are built with an optimizer that reuses argument slots for primitives inside
- * render, input, and plugin methods. A mixin callback then reloads those slots expecting
+ * JEI's published builds use an optimizer that reuses argument slots for primitives inside render,
+ * input, and plugin methods. A mixin callback then reloads those slots expecting
  * {@code this} or the method arguments and fails verification. Copy every argument into a fresh
  * local at method entry and rewrite the body to use those shadows, leaving the real argument slots
  * intact for the whole method. Copying up front keeps the rewrite valid across branches.
@@ -63,16 +66,42 @@ public final class LocalSlotFixer {
 		)
 	);
 
+	/**
+	 * Mixin calls {@code preApply} once per mixin, and more than one mixin can target the same
+	 * class ({@code PluginCaller} and {@code RecipeMap} do). All of those calls receive the same
+	 * target {@link ClassNode}, so remembering the signatures already fixed keeps the second pass
+	 * from copying the argument slots again and logging the same line twice. The keys are weak:
+	 * the target node only lives for the transformation.
+	 */
+	private static final Map<ClassNode, Set<String>> PREPARED =
+		Collections.synchronizedMap(new WeakHashMap<>());
+
 	private LocalSlotFixer() {
 	}
 
 	public static void prepare(ClassNode classNode) {
+		if (classNode == null) {
+			return;
+		}
 		Set<String> methods = TARGETS.get(classNode.name);
 		if (methods == null) {
 			return;
 		}
+		Set<String> prepared;
+		synchronized (PREPARED) {
+			prepared = PREPARED.computeIfAbsent(classNode, ignored -> new HashSet<>());
+		}
 		for (MethodNode method : classNode.methods) {
-			if (methods.contains(method.name + method.desc) && fix(method)) {
+			String signature = method.name + method.desc;
+			if (!methods.contains(signature)) {
+				continue;
+			}
+			synchronized (prepared) {
+				if (!prepared.add(signature)) {
+					continue;
+				}
+			}
+			if (fix(method)) {
 				LOGGER.info("jeasync: moved JEI's reused argument slots out of {}.{} for mixin callbacks", classNode.name, method.name);
 			}
 		}

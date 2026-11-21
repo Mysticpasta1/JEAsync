@@ -68,7 +68,7 @@ import java.util.Set;
  * as the lookups without touching the method body. See
  * {@link dev.jeasync.mixin.collect.IngredientSetMixin} for the same trade on the other class.
  * <p>
- * Targets upstream 15.74.0.234.
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(value = ElementSearch.class, remap = false)
 public abstract class ElementSearchMixin {
@@ -106,7 +106,7 @@ public abstract class ElementSearchMixin {
 	/**
 	 * Replaces the constructor's plain {@code HashMap} with a synchronized wrapper. Writes through
 	 * {@code add} then share the monitor the lookups already use, without redirecting a call inside
-	 * {@code add} (whose local slots are reused by the 0.233+ bytecode optimizer).
+	 * {@code add} (whose local slots are reused by JEI's bytecode optimizer).
 	 */
 	@Redirect(
 		method = "<init>",
@@ -126,8 +126,8 @@ public abstract class ElementSearchMixin {
 	 * and the GUI were still being built. A placeholder keeps the map entry without opening a
 	 * Lucene index. The real strings are filled in after startup returns.
 	 * <p>
-	 * Overwritten rather than redirected because the 0.233+ bytecode optimizer reuses the local
-	 * slots {@code this} and the arguments live in, which a redirect would reload.
+	 * Overwritten rather than redirected because JEI's bytecode optimizer reuses the local slots
+	 * {@code this} and the arguments live in, which a redirect would reload.
 	 *
 	 * @author Mysticpasta1
 	 * @reason Keep the deferral placeholder and route the build through the sharded builder.

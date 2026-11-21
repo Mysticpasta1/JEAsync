@@ -44,7 +44,7 @@ import java.util.stream.Stream;
  * stack in a one-second cache. Items with a subtype interpreter still take the original path,
  * because their id depends on nbt.
  * <p>
- * Targets upstream 15.74.0.234.
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(value = mezz.jei.library.recipes.collect.RecipeMap.class, remap = false)
 public abstract class RecipeMapMixin {

@@ -31,7 +31,7 @@ import java.util.List;
  * share it. The registering plugin id is kept per thread, because the builder has one field and
  * many plugins pass through {@code registerIngredients} together.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(value = IngredientManagerBuilder.class, remap = false)
 public abstract class IngredientManagerBuilderMixin {

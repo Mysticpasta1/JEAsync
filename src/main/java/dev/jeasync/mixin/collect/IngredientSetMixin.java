@@ -38,7 +38,7 @@ import java.util.Optional;
  * Sending Runtime runs those two on different threads for one ingredient type, and a {@code LinkedHashMap}
  * that is mutated from both sides can loop inside its own bucket update.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(value = mezz.jei.library.ingredients.IngredientSet.class, remap = false)
 public abstract class IngredientSetMixin<V> {

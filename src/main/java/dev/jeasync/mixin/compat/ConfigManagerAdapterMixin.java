@@ -44,7 +44,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * reaches the implementation reflectively and a shape the library does not have simply falls to
  * the next step. When nothing answers, the original exception is left standing.
  * <p>
- * Targets upstream 15.74.0.229.
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(targets = "mezz.jei.common.config.ConfigManagerAdapter$ConfigFile", remap = false)
 public abstract class ConfigManagerAdapterMixin {

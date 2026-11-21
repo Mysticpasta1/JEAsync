@@ -24,7 +24,7 @@ import java.util.Optional;
  * path throws. The id is still registered. The object currently stored under that id is the one
  * the server has.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(value = ItemStackHelper.class, remap = false)
 public abstract class ItemStackHelperMixin {

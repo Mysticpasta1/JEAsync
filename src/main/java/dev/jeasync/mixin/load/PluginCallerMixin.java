@@ -92,7 +92,7 @@ import java.util.function.Consumer;
  * file. Distributing the adapter is not where that state is decided, so the phase's threading
  * stays as above.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(value = mezz.jei.library.load.PluginCaller.class, remap = false, priority = 0)
 public abstract class PluginCallerMixin {

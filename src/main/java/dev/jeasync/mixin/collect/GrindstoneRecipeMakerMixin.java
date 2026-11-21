@@ -40,7 +40,7 @@ import java.util.stream.Stream;
  * enchantment instead of the full product. Neither scan is gated by config, so the category always
  * holds its recipes and never hides itself.
  * <p>
- * Targets upstream 15.74.0.227 and 15.74.0.228 (class unchanged between them).
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(value = GrindstoneRecipeMaker.class, remap = false)
 public class GrindstoneRecipeMakerMixin {

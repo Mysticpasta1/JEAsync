@@ -39,13 +39,14 @@ final class ModLifecycleEvents {
 				return;
 			}
 			LOGGER.info(
-				"[async-diag] effective settings: threads={} stallReportSeconds={} skippedRecipeSerializers={} dedupRecipeSerializers={} skippedCategories={} optimizeXycraft={} maxPotionDisplayStacks={}",
+				"[async-diag] effective settings: threads={} stallReportSeconds={} skippedRecipeSerializers={} dedupRecipeSerializers={} skippedCategories={} optimizeXycraft={} skipCreateItemDrainRecipes={} maxPotionDisplayStacks={}",
 				AsyncConfig.getThreadCount(),
 				AsyncConfig.stallReportSeconds(),
 				AsyncConfig.skippedRecipeSerializers(),
 				AsyncConfig.dedupRecipeSerializers(),
 				AsyncConfig.skippedCategories(),
 				AsyncConfig.optimizeXycraft(),
+				AsyncConfig.skipCreateItemDrainRecipes(),
 				AsyncConfig.maxPotionDisplayStacks());
 		}
 	}

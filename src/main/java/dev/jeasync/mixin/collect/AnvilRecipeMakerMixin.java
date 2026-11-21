@@ -41,7 +41,7 @@ import java.util.stream.Stream;
  * The book-enchantment scan is JEI's largest build, the full ingredient x enchantment x level
  * cross product; with both skipped, the anvil recipes list is empty and the category hides itself.
  * <p>
- * Targets upstream 15.74.0.227 and 15.74.0.228 (class unchanged between them).
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(value = AnvilRecipeMaker.class, remap = false)
 public class AnvilRecipeMakerMixin {

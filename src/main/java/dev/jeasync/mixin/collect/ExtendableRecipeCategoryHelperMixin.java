@@ -22,7 +22,7 @@ import java.util.function.Predicate;
  * the same recipe class both pass the check. The handler list and the identity cache are plain
  * collections too, so a lookup during registration walks them while another plugin appends.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(value = ExtendableRecipeCategoryHelper.class, remap = false)
 public abstract class ExtendableRecipeCategoryHelperMixin<T, W extends IRecipeCategoryExtension> {

@@ -83,7 +83,7 @@ import net.minecraftforge.registries.ForgeRegistries;
  * {@code Recipe} objects can be keyed, so a plugin's synthetic recipes under a listed type register
  * untouched.
  * <p>
- * Targets upstream 15.74.0.234 (the overridden methods are unchanged from 15.74.0.227).
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(value = mezz.jei.library.recipes.RecipeManagerInternal.class, remap = false)
 public abstract class RecipeManagerInternalMixin {

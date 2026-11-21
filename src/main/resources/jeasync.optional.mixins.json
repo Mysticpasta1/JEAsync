@@ -26,6 +26,7 @@
   "client": [
     "MekanismJEIRecipeTypeMixin",
     "AvaritiaJeiPluginMixin",
+    "CreateItemDrainCategoryMixin",
     "MovingStorageTintVariantsMixin",
     "SpawnerRecipeSortMixin",
     "PotionDisplayIngredientMixin",

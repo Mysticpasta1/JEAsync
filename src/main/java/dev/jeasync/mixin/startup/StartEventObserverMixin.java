@@ -58,7 +58,7 @@ import java.util.ConcurrentModificationException;
  * built, stops and starts again on that same worker. A few syncs in one load are applied.
  * Further ones are logged and skipped so a plugin that posts recipe events cannot restart forever.
  * <p>
- * Targets upstream 15.74.0.225.
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(value = StartEventObserver.class, remap = false)
 public abstract class StartEventObserverMixin {
@@ -80,6 +80,9 @@ public abstract class StartEventObserverMixin {
 
 	@Shadow
 	private boolean observedRecipeSync;
+
+	@Shadow
+	private boolean observedTagSync;
 
 	@Shadow
 	private void startIfReady() {
@@ -114,9 +117,9 @@ public abstract class StartEventObserverMixin {
 	 * @author Mysticpasta1
 	 * @reason JEI's own tick registration can miss the join. This mod's client tick is the one that runs.
 	 * <p>
-	 * 0.233 and 0.234 reuse the slots that held {@code this} and the subscriptions argument inside
-	 * {@code register}. A TAIL hook reloads those clobbered slots and fails verification, so arm
-	 * the startup check at HEAD while both slots still hold their declared values.
+	 * JEI's current bytecode reuses the slots that held {@code this} and the subscriptions argument
+	 * inside {@code register}. A TAIL hook reloads those clobbered slots and fails verification, so
+	 * arm the startup check at HEAD while both slots still hold their declared values.
 	 */
 	@Inject(method = "register", at = @At("HEAD"), remap = false)
 	private void jeasync$watchForLoadedRecipes(CallbackInfo ci) {
@@ -258,6 +261,10 @@ public abstract class StartEventObserverMixin {
 		}
 		this.observedLogin = true;
 		this.observedRecipeSync = true;
+		// 15.75 also requires a client tag sync before startIfReady will start. A manager with
+		// recipes only reaches this point after the server sent its data, so treat the sync as
+		// observed; the client-tick path below still starts when no event was seen at all.
+		this.observedTagSync = true;
 		return true;
 	}
 

@@ -20,7 +20,7 @@ import java.util.Optional;
  * {@code ConcurrentHashMap}; each compute is instead done under its own map's monitor. The icon
  * cache was added in 15.62 and needs the same treatment as the name cache.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(value = mezz.jei.forge.platform.ModHelper.class, remap = false)
 public abstract class ModHelperMixin {

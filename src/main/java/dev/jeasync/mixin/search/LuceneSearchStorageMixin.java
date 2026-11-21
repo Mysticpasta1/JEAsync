@@ -22,6 +22,8 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.MethodType;
@@ -41,11 +43,11 @@ import java.util.ArrayList;
  * {@code refresh} and {@code removeAll} still do the final reader open and the deletes; they need
  * this writer closed first because the directory allows one writer.
  * <p>
- * The 15.74.0.234 jar slices its shaded Lucene classes down to the API JEI itself uses, so the
- * merge scheduler and merge policy setters are no longer present. The writer uses Lucene's
- * defaults; batching is what keeps the pending strings from being held until the index closes.
+ * The 15.75.0.238 jar ships the full shaded Lucene API again, so the writer methods it calls declare
+ * {@link IOException} as upstream does. The writer uses Lucene's defaults; batching is what keeps
+ * the pending strings from being held until the index closes.
  * <p>
- * Targets upstream 15.74.0.234.
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(value = LuceneSearchStorage.class, remap = false)
 public abstract class LuceneSearchStorageMixin {
@@ -166,6 +168,9 @@ public abstract class LuceneSearchStorageMixin {
 					document.add(new IntPoint(VALUE_FIELD, valueId));
 					writer.addDocument(document);
 				}
+			} catch (IOException e) {
+				this.jeasync$abandonWriter(e);
+				throw new UncheckedIOException(e);
 			} catch (RuntimeException e) {
 				this.jeasync$abandonWriter(e);
 				throw e;
@@ -190,7 +195,11 @@ public abstract class LuceneSearchStorageMixin {
 			return writer;
 		}
 		IndexWriterConfig config = new IndexWriterConfig(ANALYZER);
-		writer = new IndexWriter(this.directory, config);
+		try {
+			writer = new IndexWriter(this.directory, config);
+		} catch (IOException e) {
+			throw new UncheckedIOException(e);
+		}
 		this.jeasync$writer = writer;
 		return writer;
 	}
@@ -207,8 +216,13 @@ public abstract class LuceneSearchStorageMixin {
 				return;
 			}
 			this.jeasync$writer = null;
-			writer.close();
-			this.readerDirty = true;
+			try {
+				writer.close();
+			} catch (IOException e) {
+				throw new UncheckedIOException(e);
+			} finally {
+				this.readerDirty = true;
+			}
 		}
 	}
 
@@ -225,7 +239,7 @@ public abstract class LuceneSearchStorageMixin {
 		}
 		try {
 			writer.close();
-		} catch (RuntimeException closeFailure) {
+		} catch (IOException | RuntimeException closeFailure) {
 			failure.addSuppressed(closeFailure);
 		}
 		this.readerDirty = true;

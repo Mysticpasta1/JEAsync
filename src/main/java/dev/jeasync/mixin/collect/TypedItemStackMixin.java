@@ -29,7 +29,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * recipe that asked for it. Search runs later and uses the cache, because those wrappers stay
  * alive and the hit saves a stack.
  * <p>
- * Targets upstream 15.74.0.225.
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(value = TypedItemStack.class, remap = false)
 public abstract class TypedItemStackMixin {

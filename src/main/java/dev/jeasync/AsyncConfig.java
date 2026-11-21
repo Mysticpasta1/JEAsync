@@ -22,6 +22,7 @@ public final class AsyncConfig {
 	private static final String DEDUP_RECIPE_SERIALIZERS_PROPERTY = "jeasync.dedupRecipeSerializers";
 	private static final String FILTER_EMPTY_RECIPES_PROPERTY = "jeasync.filterEmptyRecipes";
 	private static final String CAP_STORAGE_TINT_VARIANTS_PROPERTY = "jeasync.capStorageTintVariants";
+	private static final String SKIP_CREATE_ITEM_DRAIN_RECIPES_PROPERTY = "jeasync.skipCreateItemDrainRecipes";
 	private static final String OPTIMIZE_XYCRAFT_PROPERTY = "jeasync.optimizeXycraft";
 	private static final String MAX_POTION_DISPLAY_STACKS_PROPERTY = "jeasync.maxPotionDisplayStacks";
 	private static final String SKIPPED_CATEGORIES_PROPERTY = "jeasync.skippedCategories";
@@ -141,6 +142,16 @@ public final class AsyncConfig {
 	 */
 	public static boolean capStorageTintVariants() {
 		return resolveBoolean(CAP_STORAGE_TINT_VARIANTS_PROPERTY, JeAsyncConfig.COMMON.capStorageTintVariants, true);
+	}
+
+	/**
+	 * When true (the default), Create's Item Drain recipe category is not registered with any
+	 * recipes. Its recipe list is built by scanning every registered item stack for a fluid
+	 * handler, so a pack with many filled containers pays that scan per item and keeps a row and
+	 * focus links for every one of them. The category hides itself when it holds no recipes.
+	 */
+	public static boolean skipCreateItemDrainRecipes() {
+		return resolveBoolean(SKIP_CREATE_ITEM_DRAIN_RECIPES_PROPERTY, JeAsyncConfig.COMMON.skipCreateItemDrainRecipes, true);
 	}
 
 	/**

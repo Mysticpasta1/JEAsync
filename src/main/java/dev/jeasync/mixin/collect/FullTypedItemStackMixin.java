@@ -14,7 +14,7 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  * wrappers do. This wrap keeps the caller's compound by reference, and the normalized wrapper it
  * builds keeps the same reference.
  * <p>
- * Targets upstream 15.74.0.227 and 15.74.0.228 (class unchanged between them).
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(targets = "mezz.jei.common.ingredients.itemStacks.FullTypedItemStack", remap = false)
 public class FullTypedItemStackMixin {

@@ -32,7 +32,7 @@ import java.util.Collection;
  * mean the start ran before the sync arrived; JEI re-inspects on the sync landing anyway, so the
  * notice is noise. JEI's own "sent recipes but none were usable" error stays visible.
  * <p>
- * Targets upstream 15.74.0.225.
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(value = JeiStarter.class, remap = false)
 public abstract class JeiStarterMixin {

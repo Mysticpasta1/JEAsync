@@ -36,6 +36,7 @@ public final class JeAsyncConfig {
 		public final ForgeConfigSpec.BooleanValue skipAnvilRepairRecipes;
 		public final ForgeConfigSpec.BooleanValue filterEmptyRecipes;
 		public final ForgeConfigSpec.BooleanValue capStorageTintVariants;
+		public final ForgeConfigSpec.BooleanValue skipCreateItemDrainRecipes;
 		public final ForgeConfigSpec.BooleanValue optimizeXycraft;
 		public final ForgeConfigSpec.IntValue maxPotionDisplayStacks;
 		public final ForgeConfigSpec.ConfigValue<List<? extends String>> skippedRecipeSerializers;
@@ -110,6 +111,19 @@ public final class JeAsyncConfig {
 					"Turning it off builds a copy per colour again."
 				)
 				.define("capStorageTintVariants", true);
+
+			skipCreateItemDrainRecipes = builder
+				.comment(
+					"Create's Item Drain JEI category scans every registered item stack, tests it for a",
+					"fluid-handler capability, drains it and builds an emptying recipe for every filled",
+					"bucket, tank, bottle and cell it finds, plus one per potion variant. A large pack",
+					"therefore pays that item-by-item scan and then holds a row, a set of focus links",
+					"and the recipe objects for every fluid container it registered. When this is on the",
+					"category's recipe registration is skipped entirely: none of those recipes are",
+					"generated or indexed, and JEI hides the category because it has no recipes.",
+					"Turning it off restores Create's full draining list."
+				)
+				.define("skipCreateItemDrainRecipes", true);
 
 			optimizeXycraft = builder
 				.comment(

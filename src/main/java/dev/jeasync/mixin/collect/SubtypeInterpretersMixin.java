@@ -22,7 +22,7 @@ import java.util.Optional;
  * map's monitor - including the check-then-put in {@code addInterpreter}, which is a
  * read-modify-write on the map and so has to be atomic rather than two separately-locked steps.
  * <p>
- * Targets upstream 15.71.0.224.
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(value = mezz.jei.library.ingredients.subtypes.SubtypeInterpreters.class, remap = false)
 public abstract class SubtypeInterpretersMixin {

@@ -17,7 +17,7 @@ import org.objectweb.asm.tree.VarInsnNode;
  * methods unimplemented. {@code IngredientListOverlayController.init} calls the interface, the GUI
  * plugin aborts, and the overlay is never registered.
  * <p>
- * Mysticpasta1 — the published 15.74.0.225 jar has {@code m_94144_} and {@code m_93692_} only.
+ * Mysticpasta1 — the published 15.75.0.238 jar has {@code m_94144_} and {@code m_93692_} only.
  */
 public final class SearchFieldBridge {
 	private static final Logger LOGGER = LogManager.getLogger();

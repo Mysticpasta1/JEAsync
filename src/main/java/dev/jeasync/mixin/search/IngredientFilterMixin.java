@@ -67,7 +67,7 @@ import java.util.stream.Stream;
  * plugin startup. {@link #jeiAsyncBuildDeferredSearch()} fills them in after that returns, from
  * the element info cache, so the string allocations do not overlap recipe registration.
  * <p>
- * Targets upstream 15.74.0.234.
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(value = mezz.jei.gui.ingredients.IngredientFilter.class, remap = false)
 public abstract class IngredientFilterMixin {

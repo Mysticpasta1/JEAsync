@@ -16,7 +16,7 @@ import org.spongepowered.asm.mixin.injection.Redirect;
  * scans give it share one compound per enchantment, so the wrapper can hold the caller's
  * compound by reference.
  * <p>
- * Targets upstream 15.74.0.227 and 15.74.0.228 (class unchanged between them).
+ * Targets upstream 15.75.0.238.
  */
 @Mixin(targets = "mezz.jei.common.ingredients.itemStacks.NormalizedTypedItemStack", remap = false)
 public class NormalizedTypedItemStackMixin {

@@ -9,7 +9,7 @@ This is **not** a fork of JEI. It depends on a published JEI release as an ordin
 patches it at runtime with mixins.
 
 - **Mod id:** `jeasync` (display name `jeasync`)
-- **Targets:** Minecraft 1.20.1, Forge 47.x, JEI `15.74.0.234`
+- **Targets:** Minecraft 1.20.1, Forge 47.x, JEI `15.75.0.238`
 - **Java:** 17
 
 ## Performance, measured
@@ -123,7 +123,9 @@ The mixins overwrite internal methods (`RecipeManager.addRecipes`, `ErrorUtil.as
 None of that is covered by JEI's API contract, so it is not stable across releases - 15.32 to 15.71
 moved `mezz.jei.core` to `mezz.jei.common`, rewrote the recipe index behind a new
 `IngredientUidIndex`, and replaced the two search-dirty booleans with an enum set. `mods.toml`
-therefore pins `[15.74.0.227,15.75)` rather than tracking the latest JEI.
+therefore pins exactly `[15.75.0.238]`: only the JEI release this build was verified against is
+accepted, and older releases are not supported. Addon compatibility (JEI++, Recoleta and the
+per-mod fixes) is separate and stays; only the JEI version range moves with each JEI update.
 
 Two of the mixins have to be compiled *in JEI's own package*, because they name package-private
 types: `IngredientUidIndex` is the backing store for both `IngredientToRecipesMap` and `RecipeMap`,
@@ -296,6 +298,15 @@ jeasync removes the two axes that multiplied without adding information:
   That list is replaced before it is built with one recipe of each type - scroll upgrade, imbue,
   item upgrade, and affinity attune - so the category shows its real recipe types without the cross
   product.
+- **Create's item drain.** Create's Item Drain category builds its own recipe list by walking every
+  item stack JEI knows, testing each for a fluid-handler item capability, draining it, and writing
+  an emptying recipe for the result. Every filled bucket, tank, bottle and cell from every mod
+  becomes a recipe, and potion items become one per potion, so a large pack pays that item scan and
+  then keeps the generated recipes plus a JEI row and focus links for each. `skipCreateItemDrainRecipes`
+  (default `true`) cancels the category's registration before its list is built, and the category
+  hides itself for having no recipes. Turning it off builds Create's full list again.
+  This one cannot use `skippedCategories`: that drop happens in JEI's `addRecipes`, after the
+  plugin's supplier has already generated the list, so it saves the index but not the generation.
 - **The generic lever.** Plugins that hand JEI synthetic recipe objects carry no vanilla
   serializer for `skippedRecipeSerializers` to match, so `skippedCategories` drops a whole
   registration call by recipe category uid instead
@@ -404,6 +415,7 @@ comment in the file says what it does.
 | `dedupRecipeSerializers` | `tconstruct:tipped_tool_transform`, `tconstruct:casting_table`, `tconstruct:casting_basin`, `tconstruct:melting` | Recipe serializer or recipe type ids kept but collapsed to one recipe per effect or product. See [Recipes can be collapsed to one per effect or product](#recipes-can-be-collapsed-to-one-per-effect-or-product) |
 | `skippedCategories` | *(empty)* | JEI recipe category ids whose whole registration call is dropped, for synthetic mod-plugin recipes no serializer can name |
 | `capStorageTintVariants` | `true` | List each moving-storage item once, untinted, instead of once per dye colour. See [A mod plugin's recipe-viewer catalog is released after load](#a-mod-plugins-recipe-viewer-catalog-is-released-after-load) |
+| `skipCreateItemDrainRecipes` | `true` | Do not generate Create's Item Drain recipes: no item scan, no emptying recipe per fluid container, and the category hides itself. See [Memory](#memory) |
 
 Client-side rather than common: these govern how this client builds its indexes. Nothing here
 changes world state, so a dedicated server ignores the file.
@@ -424,6 +436,7 @@ A `-Djeasync.*` property wins over the file:
 | `-Djeasync.dedupRecipeSerializers=id[,id...]` | `dedupRecipeSerializers` |
 | `-Djeasync.skippedCategories=id[,id...]` | `skippedCategories` |
 | `-Djeasync.capStorageTintVariants=true/false` | `capStorageTintVariants` |
+| `-Djeasync.skipCreateItemDrainRecipes=true/false` | `skipCreateItemDrainRecipes` |
 
 The effective values are logged at startup as `[async-diag] effective settings: ...`.
 
@@ -459,7 +472,7 @@ Mojang mappings.
 On startup the mod force-loads every class it has a mixin for and reports the result:
 
 ```
-Mixin self-check: 34 target classes loaded
+Mixin self-check: 38 target classes loaded
 ```
 
 On a dedicated server the client-only targets are skipped and counted separately, since those
