@@ -32,7 +32,7 @@ import java.util.List;
  * hide methods. Those callbacks run on a startup thread. {@code RecipeManagerInternal} guards the
  * hidden set and the category cache, so the main-thread assertion is omitted on that path too.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(value = mezz.jei.library.recipes.RecipeManager.class, remap = false)
 public abstract class RecipeManagerMixin {

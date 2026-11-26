@@ -2,7 +2,7 @@ package dev.jeasync;
 
 import java.util.List;
 
-import net.minecraftforge.common.ForgeConfigSpec;
+import net.neoforged.neoforge.common.ModConfigSpec;
 
 /**
  * Client config. Plugin registration always runs off the render thread.
@@ -10,11 +10,11 @@ import net.minecraftforge.common.ForgeConfigSpec;
  * A {@code -Djeasync.*} property overrides the file. See {@link AsyncConfig}.
  */
 public final class JeAsyncConfig {
-	public static final ForgeConfigSpec SPEC;
+	public static final ModConfigSpec SPEC;
 	public static final Common COMMON;
 
 	static {
-		ForgeConfigSpec.Builder builder = new ForgeConfigSpec.Builder();
+		ModConfigSpec.Builder builder = new ModConfigSpec.Builder();
 		builder.comment(
 			"Plugin registration runs off the render thread.",
 			"A container opened before it finishes shows a progress bar.",
@@ -29,21 +29,18 @@ public final class JeAsyncConfig {
 	}
 
 	public static class Common {
-		public final ForgeConfigSpec.IntValue threads;
-		public final ForgeConfigSpec.IntValue stallReportSeconds;
-		public final ForgeConfigSpec.BooleanValue deferFocusLinks;
-		public final ForgeConfigSpec.BooleanValue skipAnvilEnchantRecipes;
-		public final ForgeConfigSpec.BooleanValue skipAnvilRepairRecipes;
-		public final ForgeConfigSpec.BooleanValue filterEmptyRecipes;
-		public final ForgeConfigSpec.BooleanValue capStorageTintVariants;
-		public final ForgeConfigSpec.BooleanValue skipCreateItemDrainRecipes;
-		public final ForgeConfigSpec.BooleanValue optimizeXycraft;
-		public final ForgeConfigSpec.IntValue maxPotionDisplayStacks;
-		public final ForgeConfigSpec.ConfigValue<List<? extends String>> skippedRecipeSerializers;
-		public final ForgeConfigSpec.ConfigValue<List<? extends String>> dedupRecipeSerializers;
-		public final ForgeConfigSpec.ConfigValue<List<? extends String>> skippedCategories;
+		public final ModConfigSpec.IntValue threads;
+		public final ModConfigSpec.IntValue stallReportSeconds;
+		public final ModConfigSpec.BooleanValue deferFocusLinks;
+		public final ModConfigSpec.BooleanValue skipAnvilEnchantRecipes;
+		public final ModConfigSpec.BooleanValue skipAnvilRepairRecipes;
+		public final ModConfigSpec.BooleanValue filterEmptyRecipes;
+		public final ModConfigSpec.BooleanValue optimizeXycraft;
+		public final ModConfigSpec.ConfigValue<List<? extends String>> skippedRecipeSerializers;
+		public final ModConfigSpec.ConfigValue<List<? extends String>> dedupRecipeSerializers;
+		public final ModConfigSpec.ConfigValue<List<? extends String>> skippedCategories;
 
-		Common(ForgeConfigSpec.Builder builder) {
+		Common(ModConfigSpec.Builder builder) {
 			threads = builder
 				.comment("Worker threads. 0 uses the processor count, and at least 2.")
 				.defineInRange("threads", 0, 0, 256);
@@ -100,31 +97,6 @@ public final class JeAsyncConfig {
 				)
 				.define("filterEmptyRecipes", true);
 
-			capStorageTintVariants = builder
-				.comment(
-					"Sophisticated Storage in Motion lists each moving-storage item in its assembly",
-					"and tier-upgrade displays once per dye colour, and keeps every one of those stacks",
-					"in a catalog it caches on its JEI plugin for the rest of the session. In a modded",
-					"pack that single cache was 155 MB and 14.6 million objects.",
-					"When this is on each item is listed once, untinted, and the tinted copies are not",
-					"built. The recipe, the tier it leads to, and the item's own entry are unchanged.",
-					"Turning it off builds a copy per colour again."
-				)
-				.define("capStorageTintVariants", true);
-
-			skipCreateItemDrainRecipes = builder
-				.comment(
-					"Create's Item Drain JEI category scans every registered item stack, tests it for a",
-					"fluid-handler capability, drains it and builds an emptying recipe for every filled",
-					"bucket, tank, bottle and cell it finds, plus one per potion variant. A large pack",
-					"therefore pays that item-by-item scan and then holds a row, a set of focus links",
-					"and the recipe objects for every fluid container it registered. When this is on the",
-					"category's recipe registration is skipped entirely: none of those recipes are",
-					"generated or indexed, and JEI hides the category because it has no recipes.",
-					"Turning it off restores Create's full draining list."
-				)
-				.define("skipCreateItemDrainRecipes", true);
-
 			optimizeXycraft = builder
 				.comment(
 					"XyCraft's JEI plugin builds a rule-to-block-state map, then derives the item and",
@@ -136,19 +108,6 @@ public final class JeAsyncConfig {
 					"map for anything else that reads it."
 				)
 				.define("optimizeXycraft", true);
-
-			maxPotionDisplayStacks = builder
-				.comment(
-					"Mantle's potion display ingredient expands to every registered potion for every",
-					"potion item, so a pack with many potions can build hundreds of thousands of",
-					"stacks behind one recipe and keep them cached. Recipe matching does not use that",
-					"expansion: the ingredient tests the item and tag directly. A positive value caps",
-					"how many variants are materialised for JEI to display, which bounds both the",
-					"display cache and the ingredient entries JEI keeps, but it also means the recipe",
-					"viewer shows fewer potion variants. 0 (the default) keeps the full expansion and",
-					"leaves this lossy trade-off opt-in."
-				)
-				.defineInRange("maxPotionDisplayStacks", 0, 0, 100000);
 
 			skippedRecipeSerializers = builder
 				.comment(

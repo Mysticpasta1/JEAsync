@@ -1,7 +1,7 @@
 package dev.jeasync.mixin.compat;
 
 import dev.jeasync.MixinApplied;
-import net.minecraftforge.fml.loading.FMLPaths;
+import net.neoforged.fml.loading.FMLPaths;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.spongepowered.asm.mixin.Mixin;
@@ -44,7 +44,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * reaches the implementation reflectively and a shape the library does not have simply falls to
  * the next step. When nothing answers, the original exception is left standing.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(targets = "mezz.jei.common.config.ConfigManagerAdapter$ConfigFile", remap = false)
 public abstract class ConfigManagerAdapterMixin {

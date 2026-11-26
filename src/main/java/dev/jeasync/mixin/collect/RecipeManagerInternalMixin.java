@@ -3,6 +3,7 @@ package dev.jeasync.mixin.collect;
 import dev.jeasync.AsyncConfig;
 import dev.jeasync.MixinApplied;
 import mezz.jei.api.gui.builder.IIngredientAcceptor;
+import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.recipe.IFocusGroup;
 import mezz.jei.api.recipe.RecipeIngredientRole;
 import mezz.jei.api.recipe.RecipeType;
@@ -35,12 +36,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
-import net.minecraft.nbt.CompoundTag;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Recipe;
-import net.minecraftforge.fluids.FluidStack;
-import net.minecraftforge.registries.ForgeRegistries;
+import net.neoforged.neoforge.fluids.FluidStack;
 
 /**
  * Makes {@link mezz.jei.library.recipes.RecipeManagerInternal} safe for concurrent recipe
@@ -83,7 +83,7 @@ import net.minecraftforge.registries.ForgeRegistries;
  * {@code Recipe} objects can be keyed, so a plugin's synthetic recipes under a listed type register
  * untouched.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(value = mezz.jei.library.recipes.RecipeManagerInternal.class, remap = false)
 public abstract class RecipeManagerInternalMixin {
@@ -94,6 +94,12 @@ public abstract class RecipeManagerInternalMixin {
 
 	@Unique
 	private static final Set<String> jeasync$dedupReported = ConcurrentHashMap.newKeySet();
+
+	@Unique
+	private static final Set<String> jeasync$categorySkippedReported = ConcurrentHashMap.newKeySet();
+
+	@Unique
+	private static final Set<String> jeasync$emptyReported = ConcurrentHashMap.newKeySet();
 
 	@Unique
 	private static final ThreadLocal<Set<String>> jeasync$dedupKeys = ThreadLocal.withInitial(HashSet::new);
@@ -154,14 +160,20 @@ public abstract class RecipeManagerInternalMixin {
 	@Overwrite
 	public <T> void addRecipes(RecipeType<T> recipeType, List<T> recipes) {
 		LOGGER.debug("Adding recipes: {}", recipeType);
+		if (AsyncConfig.skippedCategories().contains(recipeType.getUid().toString())) {
+			jeasync$markCategorySkipped(recipeType, recipes.size());
+			return;
+		}
 		RecipeTypeData<T> recipeTypeData = recipeTypeDataMap.get(recipeType);
 		IRecipeCategory<T> recipeCategory = recipeTypeData.getRecipeCategory();
 		Set<T> hiddenRecipes = recipeTypeData.getHiddenRecipes();
 
 		List<T> addedRecipes = new ArrayList<>(recipes.size());
 		boolean deferLinks = AsyncConfig.deferFocusLinks();
+		boolean filterEmpty = AsyncConfig.filterEmptyRecipes();
 		int dropped = 0;
 		int deduped = 0;
+		int empty = 0;
 		Set<String> dedupKeys = jeasync$dedupKeys.get();
 		dedupKeys.clear();
 		try {
@@ -176,6 +188,10 @@ public abstract class RecipeManagerInternalMixin {
 				}
 				RecipeIngredientSupplier ingredientSupplier = addRecipe(recipeCategory, recipe, hiddenRecipes);
 				if (ingredientSupplier != null) {
+					if (filterEmpty && jeasync$allRolesEmpty(ingredientSupplier)) {
+						empty++;
+						continue;
+					}
 					if (deferLinks) {
 						jeasync$markDeferred();
 					} else {
@@ -186,6 +202,9 @@ public abstract class RecipeManagerInternalMixin {
 			}
 		} finally {
 			dedupKeys.clear();
+		}
+		if (empty > 0) {
+			jeasync$markEmpty(recipeType, empty);
 		}
 		if (dropped > 0) {
 			jeasync$markSkipped(recipeType, dropped);
@@ -305,6 +324,40 @@ public abstract class RecipeManagerInternalMixin {
 		return links;
 	}
 
+	/**
+	 * A recipe is empty when every role has no typed ingredient. An empty output role alone is
+	 * kept: it may hold fluids or a slot the category draws itself.
+	 */
+	@Unique
+	private static boolean jeasync$allRolesEmpty(RecipeIngredientSupplier supplier) {
+		for (RecipeIngredientRole role : RecipeIngredientRole.values()) {
+			for (ITypedIngredient<?> ingredient : supplier.getIngredients(role)) {
+				if (ingredient != null) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	@Unique
+	private static void jeasync$markCategorySkipped(RecipeType<?> recipeType, int size) {
+		String uid = recipeType.getUid().toString();
+		if (jeasync$categorySkippedReported.add(uid)) {
+			LOGGER.info("jeasync: category {} is in skippedCategories, {} recipe(s) are not registered",
+				uid, size);
+		}
+	}
+
+	@Unique
+	private static void jeasync$markEmpty(RecipeType<?> recipeType, int empty) {
+		String uid = recipeType.getUid().toString();
+		if (jeasync$emptyReported.add(uid)) {
+			LOGGER.info("jeasync: {} recipe(s) in {} had no ingredients in any role and were not registered",
+				empty, uid);
+		}
+	}
+
 	@Unique
 	private static void jeasync$markDeferred() {
 		if (MixinApplied.isApplied("collect.DeferredFocusLinks")) {
@@ -388,7 +441,7 @@ public abstract class RecipeManagerInternalMixin {
 			return null;
 		}
 		try {
-			return ForgeRegistries.RECIPE_SERIALIZERS.getKey(vanillaRecipe.getSerializer());
+			return BuiltInRegistries.RECIPE_SERIALIZER.getKey(vanillaRecipe.getSerializer());
 		} catch (RuntimeException | Error e) {
 			LOGGER.debug("jeasync: {} cannot report its serializer yet, it is registered unfiltered", vanillaRecipe.getClass().getName(), e);
 			return null;
@@ -443,15 +496,14 @@ public abstract class RecipeManagerInternalMixin {
 			return null;
 		}
 		if (product instanceof ItemStack stack && !stack.isEmpty()) {
-			ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+			ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
 			if (id == null) {
 				return null;
 			}
-			CompoundTag tag = stack.getTag();
-			return "item:" + id + (tag == null ? "" : tag);
+			return "item:" + id + stack.getComponentsPatch();
 		}
 		if (product instanceof FluidStack fluid && !fluid.isEmpty()) {
-			ResourceLocation id = ForgeRegistries.FLUIDS.getKey(fluid.getFluid());
+			ResourceLocation id = BuiltInRegistries.FLUID.getKey(fluid.getFluid());
 			return id == null ? null : "fluid:" + id;
 		}
 		return null;

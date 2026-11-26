@@ -1,7 +1,7 @@
 package dev.jeasync;
 
-import net.minecraftforge.fml.loading.FMLEnvironment;
-import net.minecraftforge.fml.util.thread.SidedThreadGroups;
+import net.neoforged.fml.loading.FMLEnvironment;
+import net.neoforged.fml.util.thread.SidedThreadGroups;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 

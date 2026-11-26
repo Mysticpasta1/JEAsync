@@ -34,7 +34,7 @@ import java.util.stream.Stream;
  * every recipe checked while browsing would take the {@code hiddenRecipes} monitor once per recipe
  * per frame.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(value = mezz.jei.library.recipes.PluginManager.class, remap = false)
 public abstract class PluginManagerMixin {

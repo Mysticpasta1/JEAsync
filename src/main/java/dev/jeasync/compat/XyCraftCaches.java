@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Map;
 
 import dev.jeasync.AsyncConfig;
-import net.minecraft.nbt.CompoundTag;
+import net.minecraft.core.component.DataComponentPatch;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import org.apache.logging.log4j.LogManager;
@@ -161,9 +161,9 @@ public final class XyCraftCaches {
 	 * The parts of a stack that make it visually distinct in the extractor ingredient slot.
 	 * {@code ItemStack} has identity equality, so it cannot be used as the set key directly.
 	 */
-	private record ItemKey(Item item, int count, CompoundTag tag) {
+	private record ItemKey(Item item, int count, DataComponentPatch components) {
 		private static ItemKey of(ItemStack stack) {
-			return new ItemKey(stack.getItem(), stack.getCount(), stack.getTag());
+			return new ItemKey(stack.getItem(), stack.getCount(), stack.getComponentsPatch());
 		}
 	}
 }

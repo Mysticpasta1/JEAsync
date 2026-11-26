@@ -6,7 +6,6 @@ import dev.jeasync.JeiLoadProgress;
 import dev.jeasync.MixinApplied;
 import mezz.jei.api.ingredients.IIngredientHelper;
 import mezz.jei.api.ingredients.IIngredientType;
-import mezz.jei.api.ingredients.IIngredientTypeWithSubtypes;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.api.ingredients.subtypes.UidContext;
 import mezz.jei.api.recipe.RecipeType;
@@ -21,6 +20,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.List;
@@ -44,7 +44,7 @@ import java.util.stream.Stream;
  * stack in a one-second cache. Items with a subtype interpreter still take the original path,
  * because their id depends on nbt.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(value = mezz.jei.library.recipes.collect.RecipeMap.class, remap = false)
 public abstract class RecipeMapMixin {
@@ -102,9 +102,17 @@ public abstract class RecipeMapMixin {
 	/**
 	 * @author Mysticpasta1
 	 * @reason Skip the item-stack allocation for ingredients whose recipe id is the item.
+	 * A redirect is used rather than an overwrite because the method's second parameter is
+	 * package-private inside JEI; naming it here would make this jar export that package.
 	 */
-	@Overwrite
-	private <T> Object getIngredientUid(ITypedIngredient<T> typedIngredient) {
+	@Redirect(
+		method = "addRecipeIngredient",
+		at = @At(
+			value = "INVOKE",
+			target = "Lmezz/jei/api/ingredients/IIngredientHelper;getUid(Lmezz/jei/api/ingredients/ITypedIngredient;Lmezz/jei/api/ingredients/subtypes/UidContext;)Ljava/lang/Object;"
+		)
+	)
+	private <T> Object jeasync$fastUid(IIngredientHelper<T> ingredientHelper, ITypedIngredient<T> typedIngredient, UidContext context) {
 		if (JeiLoadProgress.isLoading() && typedIngredient instanceof TypedItemStack typedItem) {
 			Item item = ((TypedItemStackAccess) (Object) typedItem).jeasync$getItem();
 			if (!ItemSubtypeCache.hasSubtypes(this.ingredientManager, item)) {
@@ -115,14 +123,6 @@ public abstract class RecipeMapMixin {
 				return item;
 			}
 		}
-		IIngredientType<T> type = typedIngredient.getType();
-		T ingredient = typedIngredient.getIngredient();
-		IIngredientHelper<T> ingredientHelper = this.ingredientManager.getIngredientHelper(type);
-		if (type instanceof IIngredientTypeWithSubtypes<?, T> ingredientTypeWithSubtypes) {
-			if (!ingredientHelper.hasSubtypes(ingredient)) {
-				return ingredientTypeWithSubtypes.getBase(ingredient);
-			}
-		}
-		return ingredientHelper.getUid(ingredient, UidContext.Recipe);
+		return ingredientHelper.getUid(typedIngredient, context);
 	}
 }

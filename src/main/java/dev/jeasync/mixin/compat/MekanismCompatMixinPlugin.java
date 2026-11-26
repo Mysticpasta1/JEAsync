@@ -1,22 +1,21 @@
 package dev.jeasync.mixin.compat;
 
-import dev.jeasync.compat.JeiRemovedTypeRewrite;
+import java.util.List;
+import java.util.Set;
+
+import net.neoforged.fml.ModList;
 import org.objectweb.asm.tree.ClassNode;
 import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
 import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
 
-import java.util.List;
-import java.util.Set;
-
 /**
- * Applies the JEI++ compatibility mixins only when that mod is installed.
- * The probe is the mod class, not a mixin target: loading a target from here re-enters mixin application.
+ * Applies the Mekanism crash guard only when Mekanism is installed. Probing the mod list avoids
+ * loading the target class from inside the mixin plugin, which would re-enter mixin application.
  */
-public final class JeiPlusPlusMixinPlugin implements IMixinConfigPlugin {
-	private static final String JEI_PLUS_PLUS = "com.lingmu0.JeiPlusPlusMod.JeiPlusPlus";
+public final class MekanismCompatMixinPlugin implements IMixinConfigPlugin {
+	private static final String MEKANISM = "mekanism";
 
-	private boolean resolved;
-	private boolean present;
+	private Boolean present;
 
 	@Override
 	public void onLoad(String mixinPackage) {
@@ -29,15 +28,11 @@ public final class JeiPlusPlusMixinPlugin implements IMixinConfigPlugin {
 
 	@Override
 	public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
-		if (!resolved) {
-			resolved = true;
+		if (present == null) {
 			try {
-				Class.forName(JEI_PLUS_PLUS, false, JeiPlusPlusMixinPlugin.class.getClassLoader());
-				present = true;
-			} catch (ClassNotFoundException notLoaded) {
-				present = false;
+				present = ModList.get() != null && ModList.get().isLoaded(MEKANISM);
 			} catch (Throwable ignored) {
-				present = true;
+				present = false;
 			}
 		}
 		return present;
@@ -54,9 +49,6 @@ public final class JeiPlusPlusMixinPlugin implements IMixinConfigPlugin {
 
 	@Override
 	public void preApply(String targetClassName, ClassNode targetClass, String mixinClassName, IMixinInfo mixinInfo) {
-		if (JeiRemovedTypeRewrite.isGameClass(targetClassName)) {
-			JeiRemovedTypeRewrite.apply(targetClass);
-		}
 	}
 
 	@Override

@@ -12,7 +12,7 @@ import mezz.jei.api.IModPlugin;
 import mezz.jei.library.load.PluginCallerTimer;
 import mezz.jei.library.plugins.vanilla.VanillaPlugin;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraftforge.fml.loading.FMLEnvironment;
+import net.neoforged.fml.loading.FMLEnvironment;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.spongepowered.asm.mixin.Mixin;
@@ -71,7 +71,7 @@ import java.util.function.Consumer;
  * <p>
  * {@code Sending Runtime Unavailable} is not a registration phase. It is JEI's shutdown callback,
  * invoked by {@code ClientPlayerNetworkEvent.LoggingOut} on the render thread immediately before
- * Forge reverts the client registries with {@code GameData.revertToFrozen}. The callbacks
+ * NeoForge reverts the client registries with {@code GameData.revertToFrozen}. The callbacks
  * unregister Forge event listeners and drop client-side state, which is only safe on the thread
  * that owns the event bus and the registries. Dispatching them to workers races
  * {@code ListenerList} against its own resize and leaves plugins half-unregistered, and the
@@ -92,7 +92,7 @@ import java.util.function.Consumer;
  * file. Distributing the adapter is not where that state is decided, so the phase's threading
  * stays as above.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(value = mezz.jei.library.load.PluginCaller.class, remap = false, priority = 0)
 public abstract class PluginCallerMixin {
@@ -135,10 +135,11 @@ public abstract class PluginCallerMixin {
 	}
 
 	private static void callOnPluginsAsync(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func) {
-		// Before the registry freezes, stay on this thread and do not install client handles or
-		// pull services. Both of those reach into registries that other mod-loading workers are
-		// still filling.
-		if (!RegistryFreeze.itemsLocked()) {
+		// Before the registry freezes, and for the whole mod-loading lifecycle, stay on this
+		// thread and do not install client handles or pull services. Both of those reach into
+		// registries that other mod-loading workers are still filling, and the client thread is
+		// blocked joining the mod-loading worker until common setup has run.
+		if (AsyncPluginSupport.isModLoading() || !RegistryFreeze.itemsLocked()) {
 			dispatchWhileRegistriesOpen(title, plugins, func);
 			return;
 		}
@@ -233,11 +234,13 @@ public abstract class PluginCallerMixin {
 	 */
 	private static void dispatchWhileRegistriesOpen(String title, List<IModPlugin> plugins, Consumer<IModPlugin> func) {
 		JEI_ASYNC_LOGGER.info("{}...", title);
-		// This phase runs while the client thread is blocked joining the mod-loading worker, so the
-		// restore happens here on the calling thread and is not scheduled onto the client.
-		restoreClientRecipes();
+		if (!AsyncPluginSupport.isModLoading()) {
+			// This phase runs while the client thread is blocked joining the mod-loading worker, so
+			// the restore happens here on the calling thread and is not scheduled onto the client.
+			restoreClientRecipes();
+		}
 		RecipeViewerCatalogCache.remember(plugins);
-		JEI_ASYNC_LOGGER.info("jeasync: {} is staying on the calling thread because the item registry is still open", title);
+		JEI_ASYNC_LOGGER.info("jeasync: {} is staying on the calling thread because mod loading has not finished", title);
 		Stopwatch stopwatch = Stopwatch.createStarted();
 		JeiLoadProgress.beginStage(title, plugins.size());
 		try (PluginCallerTimer timer = new PluginCallerTimer()) {

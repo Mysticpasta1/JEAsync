@@ -1,5 +1,5 @@
 modLoader="javafml"
-loaderVersion="${forgeLoaderVersionRange}"
+loaderVersion="${neoforgeLoaderVersionRange}"
 
 license="The MIT License (MIT)"
 
@@ -7,21 +7,22 @@ license="The MIT License (MIT)"
 modId="${modId}"
 version="${modVersion}"
 displayName="${modName}"
+displayTest="IGNORE_ALL_VERSION"
 description='''
 Mixin-based add-on for JEI. Not a fork: it requires upstream JEI and patches it at runtime with
 mixins, running plugin registration off the main thread to speed up startup.
 '''
 
 [[dependencies.${modId}]]
-    modId="forge"
-    mandatory=true
-    versionRange="${forgeVersionRange}"
+    modId="neoforge"
+    type="required"
+    versionRange="${neoforgeVersionRange}"
     ordering="NONE"
     side="BOTH"
 
 [[dependencies.${modId}]]
     modId="minecraft"
-    mandatory=true
+    type="required"
     versionRange="${minecraftVersionRange}"
     ordering="NONE"
     side="BOTH"
@@ -30,10 +31,16 @@ mixins, running plugin registration off the main thread to speed up startup.
 # does not cover, so a different JEI release is not safe to load against.
 [[dependencies.${modId}]]
     modId="jei"
-    mandatory=true
+    type="required"
     versionRange="${jeiVersionRange}"
     ordering="AFTER"
     side="BOTH"
 
-# The mixin config is declared by the MixinConfigs manifest attribute, not here.
-# Forge 1.20.1 does not support a [[mixins]] section in mods.toml; see build.gradle.
+[[mixins]]
+config="jeasync.mixins.json"
+
+[[mixins]]
+config="jeasync.compat.default.mixins.json"
+
+[[mixins]]
+config="jeasync.mekanism.mixins.json"

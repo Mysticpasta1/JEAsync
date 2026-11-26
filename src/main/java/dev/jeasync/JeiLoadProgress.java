@@ -1,7 +1,7 @@
 package dev.jeasync;
 
 import dev.jeasync.compat.JeiCaches;
-import net.minecraftforge.fml.loading.FMLEnvironment;
+import net.neoforged.fml.loading.FMLEnvironment;
 
 import java.lang.reflect.Method;
 import java.util.concurrent.CompletableFuture;
@@ -85,7 +85,7 @@ public final class JeiLoadProgress {
 		ItemSubtypeCache.clear();
 		TypedIngredientIntern.clear();
 		AnvilEnchantCache.clear();
-		ArcaneRecipeTags.clear();
+
 		stagesStarted.set(0);
 		stageDone.set(0);
 		stageTotal.set(1);

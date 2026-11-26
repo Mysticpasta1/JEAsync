@@ -53,8 +53,8 @@ public final class LocalSlotFixer {
 		"mezz/jei/gui/recipes/RecipeTransferButtonController", Set.of(
 			"transferRecipe(ZZ)Z"
 		),
-		"mezz/jei/forge/platform/FluidHelper", Set.of(
-			"getTooltip(Ljava/util/List;Lnet/minecraftforge/fluids/FluidStack;Lnet/minecraft/world/item/TooltipFlag;)V"
+		"mezz/jei/neoforge/platform/FluidHelper", Set.of(
+			"getTooltip(Ljava/util/List;Lnet/neoforged/neoforge/fluids/FluidStack;Lnet/minecraft/world/item/TooltipFlag;)V"
 		),
 		"mezz/jei/gui/recipes/lookups/IngredientLookupState", Set.of(
 			"create(Lmezz/jei/api/recipe/IRecipeManager;Lmezz/jei/api/recipe/IFocusGroup;Ljava/util/List;Lmezz/jei/common/transfer/RecipeTransferService;)Lmezz/jei/gui/recipes/lookups/ILookupState;"

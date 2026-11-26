@@ -3,8 +3,8 @@
   "minVersion": "0.8",
   "package": "dev.jeasync.mixin",
   "plugin": "dev.jeasync.mixin.JeAsyncMixinPlugin",
-  "compatibilityLevel": "JAVA_17",
-  "refmap": "jeasync.refmap.json",
+  "compatibilityLevel": "JAVA_21",
+
   "mixins": [
     "collect.TableMixin",
     "collect.MultiMapMixin",
@@ -14,18 +14,16 @@
     "collect.ListMultiMapMixin",
     "collect.RecipeTypeDataMixin",
     "collect.IngredientUidIndexMixin",
-    "collect.ExtendableRecipeCategoryHelperMixin",
+
     "load.RecipeCategoryRegistrationMixin",
     "load.RecipeRegistrationMixin",
-    "load.ErrorUtilMixin",
+
     "load.IngredientManagerBuilderMixin",
     "collect.IngredientToRecipesMapMixin",
     "collect.RecipeMapMixin",
     "local.RecipeMapLocalSlotsMixin",
     "collect.TypedItemStackMixin",
     "collect.TypedItemStackAccess",
-    "collect.NormalizedTypedItemStackMixin",
-    "collect.FullTypedItemStackMixin",
     "collect.RecipeIngredientTableMixin",
     "collect.RecipeManagerInternalMixin",
     "collect.IngredientSetMixin",
@@ -47,15 +45,12 @@
     "local.FluidHelperLocalSlotsMixin",
     "load.VanillaPluginMixin",
     "thread.BlockableEventLoopMixin",
-    "thread.EventSubclassTransformerMixin",
     "thread.CreativeModeTabMixin",
+    "thread.MappedRegistryAccessor",
     "collect.AnvilRecipeMakerMixin",
     "collect.GrindstoneRecipeMakerMixin",
     "collect.IngredientMixin",
-    "nbt.CompoundTagMixin",
-    "nbt.CapabilityProviderAccess",
-    "nbt.ItemStackMixin",
-    "nbt.ItemStackTagAccess"
+    "nbt.CompoundTagMixin"
   ],
   "client": [
     "client.MinecraftClientAccessor",
@@ -64,12 +59,12 @@
     "collect.RegistryUtilMixin",
     "startup.StartEventObserverMixin",
     "startup.JeiStarterMixin",
-    "startup.ClientRecipeManagerMixin",
-    "client.UpdateRecipesPacketMixin",
+
+
     "startup.EventRegistrationMixin",
     "startup.GuiEventHandlerMixin",
     "startup.GuiTextFieldFilterMixin",
-    "load.ItemStackHelperMixin",
+
     "load.GuiHandlerRegistrationMixin",
     "local.FluidTankRendererLocalSlotsMixin",
     "local.RecipeCategoryTabLocalSlotsMixin",

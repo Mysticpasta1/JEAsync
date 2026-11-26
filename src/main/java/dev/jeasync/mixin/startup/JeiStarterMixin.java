@@ -6,7 +6,7 @@ import mezz.jei.common.Internal;
 import mezz.jei.library.startup.JeiStarter;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import org.apache.logging.log4j.LogManager;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -32,7 +32,7 @@ import java.util.Collection;
  * mean the start ran before the sync arrived; JEI re-inspects on the sync landing anyway, so the
  * notice is noise. JEI's own "sent recipes but none were usable" error stays visible.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(value = JeiStarter.class, remap = false)
 public abstract class JeiStarterMixin {
@@ -75,7 +75,7 @@ public abstract class JeiStarterMixin {
 		// This read only checks that the list is non-empty. It is not a plugin taking the fallback.
 		ClientRecipes.ignoreNextRecipeRead();
 		try {
-			Collection<Recipe<?>> current = level.getRecipeManager().getRecipes();
+			Collection<RecipeHolder<?>> current = level.getRecipeManager().getRecipes();
 			if (current.isEmpty()) {
 				return false;
 			}

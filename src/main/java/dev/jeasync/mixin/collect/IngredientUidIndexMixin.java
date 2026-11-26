@@ -31,7 +31,7 @@ import java.util.function.Supplier;
  * {@code java.lang.module.ResolutionException: Modules jei and jeasync export package
  * mezz.jei.library.recipes.collect to module minecraft}.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(targets = "mezz.jei.library.recipes.collect.IngredientUidIndex", remap = false)
 public abstract class IngredientUidIndexMixin {

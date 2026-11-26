@@ -22,7 +22,7 @@ import java.util.List;
  * {@link #get} returns a snapshot. The public lookup copies whatever this returns, so a live view
  * was copied immediately anyway.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(value = IngredientToRecipesMap.class, remap = false)
 public abstract class IngredientToRecipesMapMixin<R> {

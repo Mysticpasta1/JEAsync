@@ -17,7 +17,7 @@ import java.util.Set;
  * That map is declared on MultiMap, not here, so it is reached through MultiMapAccessor rather
  * than shadowed: a mixin's @Shadow only matches fields declared in its own target.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(value = mezz.jei.common.collect.SetMultiMap.class, remap = false)
 public abstract class SetMultiMapMixin<K, V> {

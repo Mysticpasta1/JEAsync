@@ -23,7 +23,7 @@ import java.util.function.Supplier;
  * mixin cannot reassign, so the wrapping happens in {@link #getRow} instead: that is already the
  * single funnel every accessor goes through.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(value = mezz.jei.common.collect.Table.class, remap = false)
 public abstract class TableMixin<R, C, V> {

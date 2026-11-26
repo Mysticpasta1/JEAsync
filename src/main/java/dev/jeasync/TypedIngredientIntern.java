@@ -2,7 +2,6 @@ package dev.jeasync;
 
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.common.ingredients.itemStacks.TypedItemStack;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ItemLike;
@@ -49,8 +48,7 @@ public final class TypedIngredientIntern {
 		if (stack == null || !JeiLoadProgress.isLoading() || ENTERED.get()) {
 			return null;
 		}
-		CompoundTag tag = stack.getTag();
-		if ((tag != null && !tag.isEmpty()) || stack.getCount() != 1) {
+		if (!stack.getComponentsPatch().isEmpty() || stack.getCount() != 1) {
 			return null;
 		}
 		return internPlain(stack.getItem(), () -> TypedItemStack.create(stack));

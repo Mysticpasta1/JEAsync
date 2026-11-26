@@ -43,11 +43,11 @@ import java.util.ArrayList;
  * {@code refresh} and {@code removeAll} still do the final reader open and the deletes; they need
  * this writer closed first because the directory allows one writer.
  * <p>
- * The 15.75.0.238 jar ships the full shaded Lucene API again, so the writer methods it calls declare
+ * JEI 19 ships the full shaded Lucene API, so the writer methods it calls declare
  * {@link IOException} as upstream does. The writer uses Lucene's defaults; batching is what keeps
  * the pending strings from being held until the index closes.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(value = LuceneSearchStorage.class, remap = false)
 public abstract class LuceneSearchStorageMixin {

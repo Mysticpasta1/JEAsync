@@ -5,7 +5,9 @@ import dev.jeasync.MixinApplied;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.ItemStackLinkedSet;
 import net.minecraft.world.item.crafting.Ingredient;
+import net.neoforged.neoforge.common.crafting.ICustomIngredient;
 import org.apache.logging.log4j.LogManager;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
@@ -17,6 +19,8 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.util.Arrays;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Reuses one dissolved tag ingredient for the whole anvil or grindstone scan.
@@ -42,6 +46,10 @@ public abstract class IngredientMixin {
 
 	@Shadow
 	private Ingredient.Value[] values;
+
+	@Shadow
+	@Nullable
+	private ICustomIngredient customIngredient;
 
 	/**
 	 * @author Mysticpasta1
@@ -104,16 +112,21 @@ public abstract class IngredientMixin {
 
 	/**
 	 * @author Mysticpasta1
-	 * @reason Dissolve the stack cache under a lock so a parallel first read cannot publish a torn array.
+	 * @reason Dissolve the stack cache under a lock so a parallel first read cannot publish a torn
+	 * array. NeoForge custom ingredients carry their items on {@code customIngredient} rather than
+	 * in {@code values}; ignoring that field makes every custom ingredient look empty, which is
+	 * what broke Mekanism's incomplete-recipe scan.
 	 */
 	@Overwrite
 	public ItemStack[] getItems() {
 		synchronized (this) {
 			if (this.itemStacks == null) {
 				jeasync$markGetItems();
-				this.itemStacks = Arrays.stream(this.values)
-					.flatMap((value) -> value.getItems().stream())
-					.distinct()
+				Stream<ItemStack> stream = this.customIngredient == null
+					? Arrays.stream(this.values).flatMap((value) -> value.getItems().stream())
+					: this.customIngredient.getItems();
+				this.itemStacks = stream
+					.collect(Collectors.toCollection(ItemStackLinkedSet::createTypeAndComponentsSet))
 					.toArray(ItemStack[]::new);
 			}
 			return this.itemStacks;

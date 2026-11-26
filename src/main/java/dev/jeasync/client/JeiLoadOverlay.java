@@ -11,11 +11,11 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.client.event.ScreenEvent;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.client.event.ScreenEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -29,7 +29,7 @@ import java.util.Optional;
  * registered only after startup, so until then the screen is vanilla. This bar does not take
  * input, and a failure while drawing it must not close the screen.
  */
-@Mod.EventBusSubscriber(modid = JeAsyncMod.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE, value = Dist.CLIENT)
+@EventBusSubscriber(modid = JeAsyncMod.MOD_ID, value = Dist.CLIENT)
 public final class JeiLoadOverlay {
 	private static final Logger LOGGER = LogManager.getLogger();
 	private static boolean reportedDrawFailure;
@@ -45,10 +45,7 @@ public final class JeiLoadOverlay {
 	}
 
 	@SubscribeEvent
-	public static void onClientTick(TickEvent.ClientTickEvent event) {
-		if (event.phase != TickEvent.Phase.END) {
-			return;
-		}
+	public static void onClientTick(ClientTickEvent.Post event) {
 		Runnable check = startupCheck;
 		if (check == null) {
 			return;

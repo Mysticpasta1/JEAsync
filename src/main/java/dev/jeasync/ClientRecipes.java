@@ -4,7 +4,7 @@ import mezz.jei.common.Internal;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.item.crafting.Recipe;
+import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.RecipeManager;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -62,21 +62,21 @@ public final class ClientRecipes {
 		if (level == null) {
 			return;
 		}
-		List<Recipe<?>> synced = Internal.getClientSyncedRecipes();
+		List<RecipeHolder<?>> synced = Internal.getClientSyncedRecipes();
 		RecipeManager manager = level.getRecipeManager();
 		Set<ResourceLocation> wanted = new HashSet<>();
-		for (Recipe<?> recipe : synced) {
+		for (RecipeHolder<?> recipe : synced) {
 			if (recipe != null) {
-				wanted.add(recipe.getId());
+				wanted.add(recipe.id());
 			}
 		}
 		if (managerHasExactly(manager, wanted)) {
 			return;
 		}
-		Map<ResourceLocation, Recipe<?>> unique = new LinkedHashMap<>();
-		for (Recipe<?> recipe : synced) {
+		Map<ResourceLocation, RecipeHolder<?>> unique = new LinkedHashMap<>();
+		for (RecipeHolder<?> recipe : synced) {
 			if (recipe != null) {
-				unique.put(recipe.getId(), recipe);
+				unique.put(recipe.id(), recipe);
 			}
 		}
 		LOGGER.info("jeasync: restoring {} synced recipes before plugin registration", unique.size());

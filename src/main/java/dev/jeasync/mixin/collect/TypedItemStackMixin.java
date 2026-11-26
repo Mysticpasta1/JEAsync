@@ -5,7 +5,6 @@ import dev.jeasync.MixinApplied;
 import dev.jeasync.TypedIngredientIntern;
 import mezz.jei.api.ingredients.ITypedIngredient;
 import mezz.jei.common.ingredients.itemStacks.TypedItemStack;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ItemLike;
 import org.spongepowered.asm.mixin.Mixin;
@@ -13,7 +12,6 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
@@ -29,7 +27,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * recipe that asked for it. Search runs later and uses the cache, because those wrappers stay
  * alive and the hit saves a stack.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(value = TypedItemStack.class, remap = false)
 public abstract class TypedItemStackMixin {
@@ -49,25 +47,6 @@ public abstract class TypedItemStackMixin {
 			MixinApplied.mark("collect.TypedItemStackMixin");
 		}
 		cir.setReturnValue(this.createItemStackUncached());
-	}
-
-	/**
-	 * @author Mysticpasta1
-	 * @reason JEI copies the tag here and the typed-stack constructor copies it again. Keep the caller's tag. An empty tag is the same as no tag, so the recipe item does not keep an empty compound.
-	 */
-	@Redirect(
-		method = "create(Lnet/minecraft/world/item/ItemStack;)Lmezz/jei/api/ingredients/ITypedIngredient;",
-		at = @At(
-			value = "INVOKE",
-			target = "Lmezz/jei/common/ingredients/itemStacks/TypedItemStack;copyTag(Lnet/minecraft/nbt/CompoundTag;)Lnet/minecraft/nbt/CompoundTag;"
-		),
-		remap = false
-	)
-	private static CompoundTag jeasync$useCallerTag(CompoundTag tag) {
-		if (tag == null || tag.isEmpty()) {
-			return null;
-		}
-		return tag;
 	}
 
 	/**

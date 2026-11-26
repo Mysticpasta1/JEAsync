@@ -1,11 +1,9 @@
 package dev.jeasync;
 
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.crafting.Ingredient;
-import net.minecraft.world.item.enchantment.EnchantmentCategory;
 import org.apache.logging.log4j.LogManager;
 
 import java.util.HashMap;
@@ -15,24 +13,17 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Remembers enchant categories while JEI builds anvil and grindstone recipes.
+ * Remembers tag ingredients while JEI builds anvil and grindstone recipes.
  * <p>
- * Both scans ask which categories a tool can take once per enchantment. Tinkers answers that by
- * testing a long list of tool actions. A stack whose tag is empty, or holds only vanilla
- * enchantment lists, has the same answer as the plain item. A stack with material data keeps its
- * own answer. The maps live on the scan thread and are dropped when the scan returns.
+ * MCreator and datapack enchantments rebuild {@code Ingredient.of(tag)} for every item they are
+ * asked about. Dissolving the tag builds a stack per match, and the next call builds that list
+ * again. The scan keeps one ingredient per tag and tests membership against the items from that
+ * one dissolve.
  * <p>
  * A scan is not registered anywhere global. {@link #clear()} moves an epoch forward and a scan
- * wipes itself the next time one of these methods touches it, so a worker thread that never returns
- * to anvil work does not keep its stacks alive for the session through a registry that outlived the
- * load.
- * <p>
- * MCreator enchantments rebuild {@code Ingredient.of(tag)} for every item they are asked about.
- * Dissolving the tag builds a stack per match, and the next call builds that list again. The scan
- * keeps one ingredient per tag and tests membership against the items from that one dissolve.
- * <p>
- * Mysticpasta1 — one plugin thread sat in tool-action checks at registering recipes 370/376.
- * Locating spent the grindstone scan rebuilding sword, axe, pickaxe, and shovel ingredients.
+ * wipes itself the next time one of these methods touches it, so a worker thread that never
+ * returns to anvil work does not keep its stacks alive for the session through a registry that
+ * outlived the load.
  */
 public final class AnvilEnchantCache {
 	private static final AtomicInteger EPOCH = new AtomicInteger();
@@ -67,31 +58,6 @@ public final class AnvilEnchantCache {
 		Scan scan = LOCAL.get();
 		scan.sync();
 		return scan.depth > 0;
-	}
-
-	public static Set<EnchantmentCategory> get(ItemStack stack) {
-		Scan scan = LOCAL.get();
-		scan.sync();
-		if (scan.depth <= 0 || stack == null) {
-			return null;
-		}
-		if (followsItem(stack)) {
-			return scan.byItem.get(stack.getItem());
-		}
-		return scan.categories.get(stack);
-	}
-
-	public static void put(ItemStack stack, Set<EnchantmentCategory> categories) {
-		Scan scan = LOCAL.get();
-		scan.sync();
-		if (scan.depth <= 0 || stack == null || categories == null) {
-			return;
-		}
-		if (followsItem(stack)) {
-			scan.byItem.put(stack.getItem(), categories);
-			return;
-		}
-		scan.categories.put(stack, categories);
 	}
 
 	/**
@@ -155,9 +121,6 @@ public final class AnvilEnchantCache {
 		EPOCH.incrementAndGet();
 	}
 
-	/**
-	 * Vanilla enchantment lists do not change which categories a tool belongs to. Material tags do.
-	 */
 	private static Scan live() {
 		Scan scan = LOCAL.get();
 		scan.sync();
@@ -167,44 +130,23 @@ public final class AnvilEnchantCache {
 		return scan;
 	}
 
-	private static boolean followsItem(ItemStack stack) {
-		CompoundTag tag = stack.getTag();
-		if (tag == null || tag.isEmpty()) {
-			return true;
-		}
-		int count = tag.size();
-		if (count > 2) {
-			return false;
-		}
-		boolean enchantments = tag.contains("Enchantments");
-		boolean stored = tag.contains("StoredEnchantments");
-		if (count == 1) {
-			return enchantments || stored;
-		}
-		return enchantments && stored;
-	}
-
 	private static void mark() {
 		if (marked) {
 			return;
 		}
 		marked = true;
 		LogManager.getLogger(AnvilEnchantCache.class).info(
-			"jeasync: reusing enchant categories for each tool during anvil and grindstone recipes"
+			"jeasync: reusing tag ingredients during anvil and grindstone recipes"
 		);
 	}
 
 	private static final class Scan {
 		private int depth;
 		private int epoch;
-		private final IdentityHashMap<ItemStack, Set<EnchantmentCategory>> categories = new IdentityHashMap<>(64);
-		private final IdentityHashMap<Item, Set<EnchantmentCategory>> byItem = new IdentityHashMap<>(64);
 		private final HashMap<TagKey<Item>, Ingredient> byTag = new HashMap<>();
 		private final IdentityHashMap<Ingredient, Set<Item>> tagItems = new IdentityHashMap<>();
 
 		private void wipe() {
-			this.categories.clear();
-			this.byItem.clear();
 			this.byTag.clear();
 			this.tagItems.clear();
 		}

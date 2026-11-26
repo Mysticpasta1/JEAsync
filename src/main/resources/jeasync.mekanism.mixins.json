@@ -1,0 +1,13 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "dev.jeasync.mixin.compat",
+  "plugin": "dev.jeasync.mixin.compat.MekanismCompatMixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "MekanismItemStackIngredientMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

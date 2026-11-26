@@ -3,13 +3,13 @@ package dev.jeasync;
 import java.util.Arrays;
 import java.util.List;
 
-import net.minecraftforge.common.ForgeConfigSpec;
+import net.neoforged.neoforge.common.ModConfigSpec;
 
 /**
  * Effective settings. A {@code -Djeasync.*} property wins over {@link JeAsyncConfig} so a
  * command-line override is not overridden by a config file.
  * <p>
- * Read on every call. Forge loads the file after mixins may already have initialized this class, so
+ * Read on every call. NeoForge loads the file after mixins may already have initialized this class, so
  * a value captured in a static final would stay at the spec default for the session.
  */
 public final class AsyncConfig {
@@ -21,10 +21,7 @@ public final class AsyncConfig {
 	private static final String SKIPPED_RECIPE_SERIALIZERS_PROPERTY = "jeasync.skippedRecipeSerializers";
 	private static final String DEDUP_RECIPE_SERIALIZERS_PROPERTY = "jeasync.dedupRecipeSerializers";
 	private static final String FILTER_EMPTY_RECIPES_PROPERTY = "jeasync.filterEmptyRecipes";
-	private static final String CAP_STORAGE_TINT_VARIANTS_PROPERTY = "jeasync.capStorageTintVariants";
-	private static final String SKIP_CREATE_ITEM_DRAIN_RECIPES_PROPERTY = "jeasync.skipCreateItemDrainRecipes";
 	private static final String OPTIMIZE_XYCRAFT_PROPERTY = "jeasync.optimizeXycraft";
-	private static final String MAX_POTION_DISPLAY_STACKS_PROPERTY = "jeasync.maxPotionDisplayStacks";
 	private static final String SKIPPED_CATEGORIES_PROPERTY = "jeasync.skippedCategories";
 
 	/** Seconds a plugin callback may run before the stall watchdog reports it. 0 disables it. */
@@ -136,59 +133,12 @@ public final class AsyncConfig {
 	}
 
 	/**
-	 * When true (the default), Sophisticated Storage in Motion's moving-storage displays list each
-	 * storage item once instead of once per dye colour. The tinted copies are the same recipe in a
-	 * catalog the mod caches for the session.
-	 */
-	public static boolean capStorageTintVariants() {
-		return resolveBoolean(CAP_STORAGE_TINT_VARIANTS_PROPERTY, JeAsyncConfig.COMMON.capStorageTintVariants, true);
-	}
-
-	/**
-	 * When true (the default), Create's Item Drain recipe category is not registered with any
-	 * recipes. Its recipe list is built by scanning every registered item stack for a fluid
-	 * handler, so a pack with many filled containers pays that scan per item and keeps a row and
-	 * focus links for every one of them. The category hides itself when it holds no recipes.
-	 */
-	public static boolean skipCreateItemDrainRecipes() {
-		return resolveBoolean(SKIP_CREATE_ITEM_DRAIN_RECIPES_PROPERTY, JeAsyncConfig.COMMON.skipCreateItemDrainRecipes, true);
-	}
-
-	/**
 	 * When true (the default), XyCraft's JEI plugin rule maps are compacted after JEI finishes
 	 * loading. The block-state map is only an intermediate used to build the item and fluid lists,
 	 * and XyCraft never reads it back; releasing it costs nothing a player can see.
 	 */
 	public static boolean optimizeXycraft() {
 		return resolveBoolean(OPTIMIZE_XYCRAFT_PROPERTY, JeAsyncConfig.COMMON.optimizeXycraft, true);
-	}
-
-	/**
-	 * The most potion variants a Mantle display ingredient may materialise. Potion ingredients
-	 * expand to every registered potion for every potion item, which can be hundreds of thousands
-	 * of stacks on a large pack. Recipe matching is unaffected because the ingredient tests the
-	 * item and tag directly, but capping the expansion means the recipe viewer shows fewer
-	 * variants, so 0 (the default) leaves it disabled. A positive value opts into the memory
-	 * saving.
-	 */
-	public static int maxPotionDisplayStacks() {
-		String property = System.getProperty(MAX_POTION_DISPLAY_STACKS_PROPERTY);
-		if (property != null) {
-			try {
-				int parsed = Integer.parseInt(property.trim());
-				if (parsed >= 0) {
-					return parsed;
-				}
-			} catch (NumberFormatException ignored) {
-				// Fall through to the config file.
-			}
-		}
-		try {
-			return JeAsyncConfig.COMMON.maxPotionDisplayStacks.get();
-		} catch (IllegalStateException ignored) {
-			// Config is not loaded yet in a dev run; keep the lossy cap disabled by default.
-			return 0;
-		}
 	}
 
 	/**
@@ -245,7 +195,7 @@ public final class AsyncConfig {
 		}
 	}
 
-	private static boolean resolveBoolean(String key, ForgeConfigSpec.BooleanValue value, boolean fallback) {
+	private static boolean resolveBoolean(String key, ModConfigSpec.BooleanValue value, boolean fallback) {
 		String property = System.getProperty(key);
 		if (property != null) {
 			return Boolean.parseBoolean(property.trim());
@@ -258,7 +208,7 @@ public final class AsyncConfig {
 		}
 	}
 
-	private static int resolveInt(String key, ForgeConfigSpec.IntValue value, int minimum) {
+	private static int resolveInt(String key, ModConfigSpec.IntValue value, int minimum) {
 		String property = System.getProperty(key);
 		if (property != null) {
 			try {

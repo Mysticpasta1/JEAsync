@@ -1,8 +1,8 @@
 package dev.jeasync.mixin.startup;
 
 import dev.jeasync.JeiLoadProgress;
-import mezz.jei.forge.startup.EventRegistration;
-import mezz.jei.forge.events.RuntimeEventSubscriptions;
+import mezz.jei.neoforge.startup.EventRegistration;
+import mezz.jei.neoforge.events.RuntimeEventSubscriptions;
 import mezz.jei.gui.startup.JeiEventHandlers;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;

@@ -1,6 +1,6 @@
 package dev.jeasync;
 
-import net.minecraftforge.fml.loading.FMLEnvironment;
+import net.neoforged.fml.loading.FMLEnvironment;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -35,17 +35,21 @@ final class MixinSelfCheck {
 		"mezz.jei.library.recipes.collect.RecipeMap",
 		"mezz.jei.library.recipes.RecipeManagerInternal",
 		"mezz.jei.library.recipes.RecipeManager",
-		"mezz.jei.library.recipes.ExtendableRecipeCategoryHelper",
+		"mezz.jei.library.plugins.vanilla.anvil.AnvilRecipeMaker",
+		"mezz.jei.library.plugins.vanilla.grindstone.GrindstoneRecipeMaker",
+
 		"mezz.jei.library.load.registration.RecipeCategoryRegistration",
+		"mezz.jei.library.load.registration.RecipeRegistration",
+		"mezz.jei.library.load.registration.IngredientManagerBuilder",
 		// Pulled in by RecipeManagerInternal, and patched indirectly via its collections.
 		"mezz.jei.library.recipes.PluginManager",
 		"mezz.jei.library.ingredients.subtypes.SubtypeInterpreters",
 		"mezz.jei.library.ingredients.RegisteredIngredients",
 		"mezz.jei.library.ingredients.IngredientVisibility",
 		"mezz.jei.library.ingredients.IngredientBlacklistInternal",
-		"net.minecraftforge.eventbus.EventSubclassTransformer",
+
 		"net.minecraft.world.item.CreativeModeTab",
-		"mezz.jei.forge.platform.ModHelper",
+		"mezz.jei.neoforge.platform.ModHelper",
 		"mezz.jei.common.ingredients.itemStacks.TypedItemStack",
 		// The config adapter's nested file record, named by its binary name because it is nested.
 		// Common code, so this loads on a server as well as a client.
@@ -73,12 +77,22 @@ final class MixinSelfCheck {
 		"mezz.jei.common.util.SafeIngredientUtil",
 		"mezz.jei.common.util.RegistryUtil",
 		"net.minecraft.client.Minecraft",
-		"mezz.jei.forge.startup.EventRegistration",
-		"mezz.jei.forge.startup.StartEventObserver",
+		"mezz.jei.neoforge.startup.EventRegistration",
+		"mezz.jei.neoforge.startup.StartEventObserver",
 		"mezz.jei.library.startup.JeiStarter",
 		"net.minecraft.world.item.crafting.RecipeManager",
 		"mezz.jei.gui.events.GuiEventHandler",
-		"mezz.jei.gui.input.GuiTextFieldFilter"
+		"mezz.jei.gui.input.GuiTextFieldFilter",
+		"mezz.jei.gui.overlay.bookmarks.BookmarkOverlay",
+		"mezz.jei.gui.recipes.RecipeCategoryTab",
+		"mezz.jei.gui.recipes.RecipeGuiLayouts",
+		"mezz.jei.gui.recipes.RecipesGui",
+		"mezz.jei.gui.recipes.RecipeTransferButtonController",
+		"mezz.jei.gui.recipes.lookups.IngredientLookupState",
+		"mezz.jei.library.gui.recipes.RecipeLayout",
+		"mezz.jei.library.render.FluidTankRenderer",
+		"mezz.jei.neoforge.platform.FluidHelper",
+		"mezz.jei.library.load.registration.GuiHandlerRegistration"
 	);
 
 	private MixinSelfCheck() {
@@ -106,7 +120,7 @@ final class MixinSelfCheck {
 		// that they applied, because they say so from inside the code they inject.
 		int applied = dev.jeasync.MixinApplied.appliedCount();
 		if (applied == 0) {
-			LOGGER.warn("No mixin has reported as applied. That is expected on a dedicated server, where JEI never calls the patched plugin dispatch, and for any mixin whose target method has not been reached yet; it is only meaningful on a client. If nothing applies on a client, the MixinConfigs manifest attribute is missing, so the config is never registered at all.");
+			LOGGER.warn("No mixin has reported as applied. That is expected on a dedicated server, where JEI never calls the patched plugin dispatch, and for any mixin whose target method has not been reached yet; it is only meaningful on a client. If nothing applies on a client, the [[mixins]] entries in neoforge.mods.toml are missing, so the config is never registered at all.");
 		} else {
 			LOGGER.info("{} mixin(s) confirmed applied: {}", applied,
 				dev.jeasync.MixinApplied.applied());
@@ -128,8 +142,8 @@ final class MixinSelfCheck {
 
 	/**
 	 * A dedicated server has no {@code net.minecraft.client}, so the client-only targets cannot
-	 * resolve there. Asking Forge which side we are on rather than probing for the class matters:
-	 * touching a client class on a dedicated server trips Forge's dist cleaner and logs an ERROR
+	 * resolve there. Asking NeoForge which side we are on rather than probing for the class matters:
+	 * touching a client class on a dedicated server trips NeoForge's dist cleaner and logs an ERROR
 	 * that looks like a real fault.
 	 */
 	private static boolean isClient() {

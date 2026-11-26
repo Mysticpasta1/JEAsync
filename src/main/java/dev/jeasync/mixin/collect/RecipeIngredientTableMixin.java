@@ -19,7 +19,7 @@ import java.util.Map;
  * {@link mezz.jei.library.recipes.collect.IngredientToRecipesMap}. That makes entry creation atomic;
  * the published map guards its own contents.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(value = mezz.jei.library.recipes.collect.RecipeIngredientTable.class, remap = false)
 public abstract class RecipeIngredientTableMixin {

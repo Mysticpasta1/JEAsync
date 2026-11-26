@@ -25,7 +25,7 @@ import java.util.function.Function;
  * created, because they are handed out through {@link #get} and iterated by callers outside the
  * map lock.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(value = mezz.jei.common.collect.MultiMap.class, remap = false)
 public abstract class MultiMapMixin<K, V, T extends Collection<V>> {

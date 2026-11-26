@@ -67,7 +67,7 @@ import java.util.stream.Stream;
  * plugin startup. {@link #jeiAsyncBuildDeferredSearch()} fills them in after that returns, from
  * the element info cache, so the string allocations do not overlap recipe registration.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(value = mezz.jei.gui.ingredients.IngredientFilter.class, remap = false)
 public abstract class IngredientFilterMixin {
@@ -452,9 +452,9 @@ public abstract class IngredientFilterMixin {
 		int indexed = 0;
 		for (ITypedIngredient<V> ingredient : ingredients) {
 			try {
-				Optional<IListElement<V>> existing = this.elementSearch.findElement(ingredient, ingredientHelper);
-				if (existing.isPresent()) {
-					IListElement<V> element = existing.get();
+				IListElement<V> existing = this.elementSearch.findElement(ingredient, ingredientHelper);
+				if (existing != null) {
+					IListElement<V> element = existing;
 					synchronized (this) {
 						updateHiddenState(element);
 					}
@@ -579,9 +579,9 @@ public abstract class IngredientFilterMixin {
 	public <V> void onIngredientsUpdated(IIngredientHelper<V> ingredientHelper, Collection<ITypedIngredient<V>> ingredients) {
 		boolean changed = false;
 		for (ITypedIngredient<V> ingredient : ingredients) {
-			Optional<IListElement<V>> matching = this.elementSearch.findElement(ingredient, ingredientHelper);
-			if (matching.isPresent()) {
-				IListElement<V> element = matching.get();
+			IListElement<V> matching = this.elementSearch.findElement(ingredient, ingredientHelper);
+			if (matching != null) {
+				IListElement<V> element = matching;
 				element.setTypedIngredient(ingredient);
 				synchronized (this) {
 					changed |= dirtyIngredients.add(element);

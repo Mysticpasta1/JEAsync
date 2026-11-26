@@ -41,7 +41,7 @@ import java.util.Set;
  * The set updates follow upstream. Mixin cannot wrap those loops without replacing the methods,
  * and leaving them alone means unsynchronised access to the sets.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(value = mezz.jei.library.ingredients.IngredientBlacklistInternal.class, remap = false)
 public abstract class IngredientBlacklistInternalMixin implements IIngredientManager.IIngredientListener, IIngredientVisibility.IListener {

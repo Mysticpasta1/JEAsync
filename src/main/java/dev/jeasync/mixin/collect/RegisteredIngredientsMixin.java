@@ -25,7 +25,7 @@ import java.util.Optional;
  * rather than optimistically outside it: doing it outside would reintroduce the same race on the
  * subsequent {@code put}.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(value = mezz.jei.library.ingredients.RegisteredIngredients.class, remap = false)
 public abstract class RegisteredIngredientsMixin {

@@ -68,7 +68,7 @@ import java.util.Set;
  * as the lookups without touching the method body. See
  * {@link dev.jeasync.mixin.collect.IngredientSetMixin} for the same trade on the other class.
  * <p>
- * Targets upstream 15.75.0.238.
+ * Targets upstream 19.76.1.481.
  */
 @Mixin(value = ElementSearch.class, remap = false)
 public abstract class ElementSearchMixin {
@@ -304,7 +304,7 @@ public abstract class ElementSearchMixin {
 	 */
 	@Overwrite
 	@SuppressWarnings("unchecked")
-	public <T> Optional<IListElement<T>> findElement(ITypedIngredient<T> ingredient, IIngredientHelper<T> ingredientHelper) {
+	public <T> IListElement<T> findElement(ITypedIngredient<T> ingredient, IIngredientHelper<T> ingredientHelper) {
 		Object uniqueId = ingredientHelper.getUid(ingredient, UidContext.Ingredient);
 
 		IListElement<?> element;
@@ -312,9 +312,9 @@ public abstract class ElementSearchMixin {
 			element = allElements.get(uniqueId);
 		}
 		if (element != null && element.getTypedIngredient().getType().equals(ingredient.getType())) {
-			return Optional.of((IListElement<T>) element);
+			return (IListElement<T>) element;
 		}
-		return Optional.empty();
+		return null;
 	}
 
 	/**

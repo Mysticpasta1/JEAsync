@@ -2,8 +2,7 @@ plugins {
     id 'java'
     id 'idea'
     id 'eclipse'
-    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
-    id 'org.spongepowered.mixin' version '0.7.+'
+    id 'net.neoforged.moddev' version '2.0.148'
 }
 
 group = project.modGroup
@@ -13,7 +12,7 @@ def minecraftVersion = project.minecraftVersion
 def modJavaVersion = project.modJavaVersion
 
 base {
-    archivesName = "${project.modId}-${project.modFlavor}-${minecraftVersion}-forge"
+    archivesName = "${project.modId}-${project.modFlavor}-${minecraftVersion}-neoforge"
 }
 
 java {
@@ -22,16 +21,46 @@ java {
     }
 }
 
-minecraft {
-    mappings 'official', minecraftVersion
-    copyIdeResources = true
+def forwardedProperties = ['jeasync.threads']
+
+neoForge {
+    version = project.neoforgeVersion
+
+    runs {
+        client {
+            client()
+            gameDirectory = project.file('run/client')
+            systemProperty 'forge.logging.console.level', 'debug'
+            forwardedProperties.each { key ->
+                if (project.hasProperty(key)) {
+                    systemProperty key, project.getProperty(key)
+                }
+            }
+            if (project.hasProperty('quickPlayServer')) {
+                programArguments.addAll '--quickPlayMultiplayer', project.getProperty('quickPlayServer')
+            }
+        }
+        server {
+            server()
+            gameDirectory = project.file('run/server')
+            systemProperty 'forge.logging.console.level', 'debug'
+            forwardedProperties.each { key ->
+                if (project.hasProperty(key)) {
+                    systemProperty key, project.getProperty(key)
+                }
+            }
+        }
+    }
+
+    mods {
+        "${project.modId}" {
+            sourceSet sourceSets.main
+        }
+    }
 }
 
 repositories {
-    maven {
-        name = 'Forge'
-        url = 'https://maven.minecraftforge.net'
-    }
+    mavenCentral()
     maven {
         name = 'JEI'
         url = 'https://maven.blamejared.com'
@@ -42,7 +71,7 @@ repositories {
     }
     maven {
         name = 'Sponge'
-        url = 'https://maven.spongepowered.org/repository/maven-public/'
+        url = 'https://repo.spongepowered.org/repository/maven-public/'
         content {
             includeGroup 'org.spongepowered'
         }
@@ -57,39 +86,30 @@ repositories {
 }
 
 dependencies {
-    minecraft "net.minecraftforge:forge:${minecraftVersion}-${project.forgeVersion}"
-    implementation fg.deobf("mezz.jei:jei-${minecraftVersion}-forge:${project.jeiVersion}")
-    // JEI 15.75 declares mezz_config as a mandatory mod dependency. It is not nested in the JEI
+    // JEI 19.76 declares mezz_config as a mandatory mod dependency. It is not nested in the JEI
     // jar, so a dev run needs it on the mod classpath just like a player install does.
-    runtimeOnly fg.deobf("net.mezzdev.config:mezz_config-${minecraftVersion}-forge:0.6.10")
-    compileOnly fg.deobf("curse.maven:jei-plus-plus-1645653:9060789")
-    compileOnly fg.deobf("curse.maven:recoleta-1533337:8178730")
-    compileOnly 'org.spongepowered:mixin:0.8.5'
-    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
-}
-
-mixin {
-    add sourceSets.main, 'jeasync.refmap.json'
-    config 'jeasync.mixins.json'
-    config 'jeasync.compat.mixins.json'
-    config 'jeasync.compat.default.mixins.json'
-    config 'jeasync.optional.mixins.json'
+    implementation "mezz.jei:jei-${minecraftVersion}-neoforge:${project.jeiVersion}"
+    runtimeOnly "net.mezzdev.config:mezz_config-${minecraftVersion}-neoforge:${project.mezzConfigVersion}"
+    compileOnly "curse.maven:jei-plus-plus-1645653:${project.jeiPlusPlusFileId}"
+    compileOnly "curse.maven:recoleta-1533337:${project.recoletaFileId}"
+    compileOnly "curse.maven:mekanism-268560:7904058"
+    compileOnly 'org.spongepowered:mixin:0.8.7'
 }
 
 tasks.named('processResources', ProcessResources) {
     def props = [
-        forgeLoaderVersionRange: project.forgeLoaderVersionRange,
-        forgeVersionRange    : project.forgeVersionRange,
-        minecraftVersionRange: project.minecraftVersionRange,
-        modGroup             : project.modGroup,
-        modId                : project.modId,
-        modJavaVersion       : project.modJavaVersion,
-        modName              : project.modName,
-        modVersion           : project.modVersion,
-        jeiVersionRange      : project.jeiVersionRange,
+        neoforgeLoaderVersionRange: project.neoforgeLoaderVersionRange,
+        neoforgeVersionRange    : project.neoforgeVersionRange,
+        minecraftVersionRange   : project.minecraftVersionRange,
+        modGroup                : project.modGroup,
+        modId                   : project.modId,
+        modJavaVersion          : project.modJavaVersion,
+        modName                 : project.modName,
+        modVersion              : project.modVersion,
+        jeiVersionRange         : project.jeiVersionRange,
     ]
     inputs.properties(props)
-    filesMatching('META-INF/mods.toml') {
+    filesMatching('META-INF/neoforge.mods.toml') {
         expand(props)
     }
 }
@@ -100,40 +120,11 @@ def modManifestAttributes = [
     'Implementation-Title' : project.name,
     'Implementation-Version': project.version,
     'Implementation-Vendor': project.modGroup,
-    'MixinConfigs'         : 'jeasync.mixins.json,jeasync.compat.mixins.json,jeasync.compat.default.mixins.json,jeasync.optional.mixins.json',
 ]
 
 tasks.named('jar', Jar) {
     manifest {
         attributes(modManifestAttributes)
-    }
-}
-
-def forwardedProperties = ['jeasync.threads']
-
-minecraft {
-    runs {
-        client {
-            workingDirectory project.file('run/client')
-            property 'forge.logging.console.level', 'debug'
-            forwardedProperties.each { key ->
-                if (project.hasProperty(key)) {
-                    property key, project.getProperty(key)
-                }
-            }
-            if (project.hasProperty('quickPlayServer')) {
-                args '--quickPlayMultiplayer', project.property('quickPlayServer')
-            }
-        }
-        server {
-            workingDirectory project.file('run/server')
-            property 'forge.logging.console.level', 'debug'
-            forwardedProperties.each { key ->
-                if (project.hasProperty(key)) {
-                    property key, project.getProperty(key)
-                }
-            }
-        }
     }
 }
 

@@ -1,32 +1,34 @@
 package dev.jeasync;
 
-import net.minecraft.world.item.Item;
-import net.minecraft.world.level.block.Block;
-import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraftforge.registries.IForgeRegistry;
-import net.minecraftforge.registries.IForgeRegistryModifiable;
+import dev.jeasync.mixin.thread.MappedRegistryAccessor;
+import net.minecraft.core.Registry;
+import net.minecraft.core.registries.BuiltInRegistries;
 
 /**
- * Whether Forge has finished writing a registry.
+ * Whether NeoForge has finished writing a registry.
  * <p>
- * {@code ForgeRegistry} keeps names and ids in {@code HashBiMap}s. A lookup from another thread
- * while a mod is still registering walks the map during a write, and the map drops entries that
- * were already stored. Vanilla ids such as {@code minecraft:glass} disappear along with mod ids.
- * Lookups have to wait until {@link IForgeRegistryModifiable#isLocked()}.
+ * Minecraft's {@code MappedRegistry} is not safe to read from another thread while a mod is still
+ * registering into it: the id map and the name map are updated in sequence, and a lookup that
+ * lands between the two writes can miss entries that were already stored. Lookups have to wait
+ * until the registry is frozen. NeoForge freezes the item and block registries after mod loading;
+ * the accessor mixin reads that flag without reflecting into the module.
  */
 public final class RegistryFreeze {
 	private RegistryFreeze() {
 	}
 
 	public static boolean itemsLocked() {
-		return locked(ForgeRegistries.ITEMS);
+		return locked(BuiltInRegistries.ITEM);
 	}
 
 	public static boolean blocksLocked() {
-		return locked(ForgeRegistries.BLOCKS);
+		return locked(BuiltInRegistries.BLOCK);
 	}
 
-	private static boolean locked(IForgeRegistry<?> registry) {
-		return registry instanceof IForgeRegistryModifiable<?> modifiable && modifiable.isLocked();
+	private static boolean locked(Registry<?> registry) {
+		if (registry instanceof MappedRegistryAccessor accessor) {
+			return accessor.jeasync$isFrozen();
+		}
+		return true;
 	}
 }

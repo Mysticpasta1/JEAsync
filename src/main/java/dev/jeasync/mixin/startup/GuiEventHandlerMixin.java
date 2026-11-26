@@ -47,29 +47,15 @@ public abstract class GuiEventHandlerMixin {
 		}
 	}
 
-	@Inject(method = "onDrawBackgroundPost", at = @At("HEAD"), cancellable = true, remap = false)
-	private void jeasync$holdBackground(GuiGraphics guiGraphics, CallbackInfo ci) {
+	@Inject(method = "drawForScreenBackground", at = @At("HEAD"), cancellable = true, remap = false)
+	private void jeasync$holdBackground(Screen screen, GuiGraphics guiGraphics, CallbackInfo ci) {
 		if (!JeiLoadProgress.isGuiReady()) {
 			ci.cancel();
 		}
 	}
 
-	@Inject(method = "onDrawForeground", at = @At("HEAD"), cancellable = true, remap = false)
-	private void jeasync$holdForeground(AbstractContainerScreen<?> screen, GuiGraphics guiGraphics, int mouseX, int mouseY, CallbackInfo ci) {
-		if (!JeiLoadProgress.isGuiReady()) {
-			ci.cancel();
-		}
-	}
-
-	@Inject(method = "onDrawForegroundAtIdentity", at = @At("HEAD"), cancellable = true, remap = false)
-	private void jeasync$holdForegroundIdentity(GuiGraphics guiGraphics, int mouseX, int mouseY, CallbackInfo ci) {
-		if (!JeiLoadProgress.isGuiReady()) {
-			ci.cancel();
-		}
-	}
-
-	@Inject(method = "onDrawScreenPost", at = @At("HEAD"), cancellable = true, remap = false)
-	private void jeasync$holdDraw(Screen screen, GuiGraphics guiGraphics, int mouseX, int mouseY, CallbackInfo ci) {
+	@Inject(method = "drawForScreenForeground", at = @At("HEAD"), cancellable = true, remap = false)
+	private void jeasync$holdForeground(Screen screen, GuiGraphics guiGraphics, int mouseX, int mouseY, CallbackInfo ci) {
 		if (!JeiLoadProgress.isGuiReady()) {
 			ci.cancel();
 		}

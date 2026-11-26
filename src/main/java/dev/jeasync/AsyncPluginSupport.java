@@ -32,6 +32,14 @@ public final class AsyncPluginSupport {
     private static volatile ExecutorService startupExecutor;
     private static volatile ExecutorService searchBuildExecutor;
 
+    /**
+     * True until NeoForge has finished the mod-loading lifecycle. JEI constructs its starter on a
+     * mod-loading worker, and the client thread is blocked joining that worker for the whole time.
+     * Dispatching a phase there and waiting for the client thread to run a restore deadlocks both
+     * threads, so phases during mod loading always stay on the calling thread.
+     */
+    private static volatile boolean modLoading = true;
+
     private AsyncPluginSupport() {
     }
 
@@ -167,6 +175,14 @@ public final class AsyncPluginSupport {
 
     public static boolean isIncompatible(IModPlugin plugin) {
         return INCOMPATIBLE.contains(plugin);
+    }
+
+    public static boolean isModLoading() {
+        return modLoading;
+    }
+
+    public static void finishModLoading() {
+        modLoading = false;
     }
 
     /**
