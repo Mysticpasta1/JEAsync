@@ -1,10 +1,12 @@
 package dev.jeasync;
 
 import it.unimi.dsi.fastutil.objects.ObjectOpenHashSet;
+import mezz.jei.api.ingredients.IIngredientType;
 import org.apache.logging.log4j.LogManager;
 
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -61,6 +63,53 @@ public final class IngredientUidIndexCalls {
 		return forEach;
 	}
 
+	/*
+	 * The bindings below are typed and adapted to Object/void, so the call sites can use
+	 * invokeExact. The previous code rebuilt an Object[] for every index lookup and called
+	 * invokeWithArguments, which is several times slower and allocates on the recipe
+	 * registration hot path. A fuel-recipe plugin can drive millions of these calls.
+	 */
+
+	public static Call getCall(Object receiver, MethodHandle handle, IIngredientType<?> type, Object uid) {
+		return () -> invokeGet(receiver, handle, type, uid);
+	}
+
+	public static Call getPairCall(Object receiver, MethodHandle handle, IIngredientType<?> type, Object exactUid, Object groupingUid) {
+		return () -> invokeGetPair(receiver, handle, type, exactUid, groupingUid);
+	}
+
+	public static Call computeCall(Object receiver, MethodHandle handle, IIngredientType<?> type, Object uid, Supplier<?> supplier) {
+		return () -> invokeCompute(receiver, handle, type, uid, supplier);
+	}
+
+	public static Call forEachCall(Object receiver, MethodHandle handle, Object consumer) {
+		return () -> {
+			invokeForEach(receiver, handle, consumer);
+			return null;
+		};
+	}
+
+	/*
+	 * The index methods are unbound instance methods, so the receiver is the first argument.
+	 * It is typed as Object here and adapted to that type when the handle is bound; naming the
+	 * package-private index class would export a package JEI already exports.
+	 */
+	private static Object invokeGet(Object receiver, MethodHandle handle, IIngredientType<?> type, Object uid) throws Throwable {
+		return (Object) handle.invokeExact(receiver, (IIngredientType) type, uid);
+	}
+
+	private static Object invokeGetPair(Object receiver, MethodHandle handle, IIngredientType<?> type, Object exactUid, Object groupingUid) throws Throwable {
+		return (Object) handle.invokeExact(receiver, (IIngredientType) type, exactUid, groupingUid);
+	}
+
+	private static Object invokeCompute(Object receiver, MethodHandle handle, IIngredientType<?> type, Object uid, Supplier<?> supplier) throws Throwable {
+		return (Object) handle.invokeExact(receiver, (IIngredientType) type, uid, (Supplier<?>) supplier);
+	}
+
+	private static void invokeForEach(Object receiver, MethodHandle handle, Object consumer) throws Throwable {
+		handle.invokeExact(receiver, consumer);
+	}
+
 	/**
 	 * The caller of {@code compute*IfAbsent} adds to the collection the supplier just created.
 	 * That add happens after the index method returns, so the collection itself has to accept
@@ -103,11 +152,16 @@ public final class IngredientUidIndexCalls {
 				Class<?> ingredientType = Class.forName("mezz.jei.api.ingredients.IIngredientType");
 				Class<?> supplier = Class.forName("java.util.function.Supplier");
 				Class<?> consumer = Class.forName("mezz.jei.library.recipes.collect.IngredientUidIndex$EntryConsumer");
-				getOne = bind(index, "get", ingredientType, Object.class);
-				getPair = bind(index, "get", ingredientType, Object.class, Object.class);
-				computeExact = bind(index, "computeExactIfAbsent", ingredientType, Object.class, supplier);
-				computeGrouping = bind(index, "computeGroupingIfAbsent", ingredientType, Object.class, supplier);
-				forEach = bind(index, "forEach", consumer);
+				getOne = bind(index, "get", ingredientType, Object.class)
+					.asType(MethodType.methodType(Object.class, Object.class, ingredientType, Object.class));
+				getPair = bind(index, "get", ingredientType, Object.class, Object.class)
+					.asType(MethodType.methodType(Object.class, Object.class, ingredientType, Object.class, Object.class));
+				computeExact = bind(index, "computeExactIfAbsent", ingredientType, Object.class, supplier)
+					.asType(MethodType.methodType(Object.class, Object.class, ingredientType, Object.class, supplier));
+				computeGrouping = bind(index, "computeGroupingIfAbsent", ingredientType, Object.class, supplier)
+					.asType(MethodType.methodType(Object.class, Object.class, ingredientType, Object.class, supplier));
+				forEach = bind(index, "forEach", consumer)
+					.asType(MethodType.methodType(void.class, Object.class, Object.class));
 			} catch (Throwable t) {
 				LogManager.getLogger().error("jeasync: could not lock the recipe uid index", t);
 			}

@@ -93,6 +93,8 @@ dependencies {
     compileOnly "curse.maven:jei-plus-plus-1645653:${project.jeiPlusPlusFileId}"
     compileOnly "curse.maven:recoleta-1533337:${project.recoletaFileId}"
     compileOnly "curse.maven:mekanism-268560:7904058"
+    compileOnly "curse.maven:astral-sorcery-241721:9281073"
+    compileOnly "curse.maven:observerlib-316833:8726128"
     compileOnly 'org.spongepowered:mixin:0.8.7'
 }
 

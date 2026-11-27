@@ -44,3 +44,6 @@ config="jeasync.compat.default.mixins.json"
 
 [[mixins]]
 config="jeasync.mekanism.mixins.json"
+
+[[mixins]]
+config="jeasync.astralsorcery.mixins.json"

@@ -171,6 +171,12 @@ public abstract class RecipeManagerInternalMixin {
 		List<T> addedRecipes = new ArrayList<>(recipes.size());
 		boolean deferLinks = AsyncConfig.deferFocusLinks();
 		boolean filterEmpty = AsyncConfig.filterEmptyRecipes();
+		// Read the configuration once per addRecipes call, not once per recipe. A fuel plugin can
+		// hand JEI millions of recipes, and copying the dedup list for every one of them is pure
+		// allocation. The id sets also avoid formatting a ResourceLocation per recipe.
+		Set<ResourceLocation> skippedIds = jeasync$configuredIds(AsyncConfig.skippedRecipeSerializers());
+		Set<ResourceLocation> dedupIds = jeasync$configuredIds(AsyncConfig.dedupRecipeSerializers());
+		boolean dedupType = !dedupIds.isEmpty() && dedupIds.contains(recipeType.getUid());
 		int dropped = 0;
 		int deduped = 0;
 		int empty = 0;
@@ -178,11 +184,11 @@ public abstract class RecipeManagerInternalMixin {
 		dedupKeys.clear();
 		try {
 			for (T recipe : recipes) {
-				if (jeasync$isSkippedRecipe(recipe)) {
+				if (!skippedIds.isEmpty() && jeasync$isSkippedRecipe(recipe, skippedIds)) {
 					dropped++;
 					continue;
 				}
-				if (jeasync$isRedundantRecipe(recipeType, recipe)) {
+				if (!dedupIds.isEmpty() && jeasync$isRedundantRecipe(recipe, dedupIds, dedupType)) {
 					deduped++;
 					continue;
 				}
@@ -375,13 +381,24 @@ public abstract class RecipeManagerInternalMixin {
 	 * through untouched.
 	 */
 	@Unique
-	private static boolean jeasync$isSkippedRecipe(Object recipe) {
-		List<String> skipped = AsyncConfig.skippedRecipeSerializers();
-		if (skipped.isEmpty()) {
-			return false;
+	private static Set<ResourceLocation> jeasync$configuredIds(List<String> configured) {
+		if (configured.isEmpty()) {
+			return Set.of();
 		}
+		Set<ResourceLocation> ids = new HashSet<>(configured.size());
+		for (String id : configured) {
+			ResourceLocation parsed = ResourceLocation.tryParse(id);
+			if (parsed != null) {
+				ids.add(parsed);
+			}
+		}
+		return ids;
+	}
+
+	@Unique
+	private static boolean jeasync$isSkippedRecipe(Object recipe, Set<ResourceLocation> skipped) {
 		ResourceLocation serializerId = jeasync$serializerId(recipe);
-		return serializerId != null && skipped.contains(serializerId.toString());
+		return serializerId != null && skipped.contains(serializerId);
 	}
 
 	@Unique
@@ -408,18 +425,14 @@ public abstract class RecipeManagerInternalMixin {
 	 * product can neither be read stays distinct.
 	 */
 	@Unique
-	private static boolean jeasync$isRedundantRecipe(RecipeType<?> recipeType, Object recipe) {
-		List<String> dedup = AsyncConfig.dedupRecipeSerializers();
-		if (dedup.isEmpty()) {
-			return false;
-		}
+	private static boolean jeasync$isRedundantRecipe(Object recipe, Set<ResourceLocation> dedup, boolean typeListed) {
 		// A recipe type is listed as well as a serializer: Tinkers gives every casting and melting
 		// variant its own serializer but keeps them all under one recipe type, so naming the type
 		// covers the family instead of enumerating its serializers.
-		boolean listed = dedup.contains(recipeType.getUid().toString());
+		boolean listed = typeListed;
 		if (!listed) {
 			ResourceLocation serializerId = jeasync$serializerId(recipe);
-			listed = serializerId != null && dedup.contains(serializerId.toString());
+			listed = serializerId != null && dedup.contains(serializerId);
 		}
 		// A listed type also covers the synthetic recipes a plugin registers under it, and those have
 		// no effect field to read; only a vanilla Recipe can be keyed.

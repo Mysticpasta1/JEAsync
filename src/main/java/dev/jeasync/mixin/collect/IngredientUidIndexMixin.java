@@ -1,6 +1,7 @@
 package dev.jeasync.mixin.collect;
 
 import dev.jeasync.IngredientUidIndexCalls;
+import dev.jeasync.IngredientUidIndexCalls.Call;
 import mezz.jei.api.ingredients.IIngredientType;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -57,55 +58,58 @@ public abstract class IngredientUidIndexMixin {
 	@Inject(method = "get(Lmezz/jei/api/ingredients/IIngredientType;Ljava/lang/Object;)Lmezz/jei/library/recipes/collect/MatchBuckets;", at = @At("HEAD"), cancellable = true, remap = false)
 	private void jeasync$lockGet(IIngredientType<?> ingredientType, Object uid, CallbackInfoReturnable<Object> cir) {
 		MethodHandle handle = IngredientUidIndexCalls.getOne();
-		if (handle == null) {
+		if (handle == null || jeasync$lock().isHeldByCurrentThread()) {
 			return;
 		}
-		jeasync$guard(cir, handle, new Object[] { ingredientType, uid });
+		jeasync$guard(cir, IngredientUidIndexCalls.getCall(this, handle, ingredientType, uid));
 	}
 
 	@Inject(method = "get(Lmezz/jei/api/ingredients/IIngredientType;Ljava/lang/Object;Ljava/lang/Object;)Lmezz/jei/library/recipes/collect/MatchBuckets;", at = @At("HEAD"), cancellable = true, remap = false)
 	private void jeasync$lockGetPair(IIngredientType<?> ingredientType, Object exactUid, Object groupingUid, CallbackInfoReturnable<Object> cir) {
 		MethodHandle handle = IngredientUidIndexCalls.getPair();
-		if (handle == null) {
+		if (handle == null || jeasync$lock().isHeldByCurrentThread()) {
 			return;
 		}
-		jeasync$guard(cir, handle, new Object[] { ingredientType, exactUid, groupingUid });
+		jeasync$guard(cir, IngredientUidIndexCalls.getPairCall(this, handle, ingredientType, exactUid, groupingUid));
 	}
 
 	@Inject(method = "computeExactIfAbsent", at = @At("HEAD"), cancellable = true, remap = false)
 	private void jeasync$lockComputeExact(IIngredientType<?> ingredientType, Object uid, Supplier<?> valueSupplier, CallbackInfoReturnable<Object> cir) {
 		MethodHandle handle = IngredientUidIndexCalls.computeExact();
-		if (handle == null) {
+		if (handle == null || jeasync$lock().isHeldByCurrentThread()) {
 			return;
 		}
-		jeasync$guard(cir, handle, new Object[] { ingredientType, uid, IngredientUidIndexCalls.guarding(valueSupplier) });
+		jeasync$guard(cir, IngredientUidIndexCalls.computeCall(this, handle, ingredientType, uid, IngredientUidIndexCalls.guarding(valueSupplier)));
 	}
 
 	@Inject(method = "computeGroupingIfAbsent", at = @At("HEAD"), cancellable = true, remap = false)
 	private void jeasync$lockComputeGrouping(IIngredientType<?> ingredientType, Object uid, Supplier<?> valueSupplier, CallbackInfoReturnable<Object> cir) {
 		MethodHandle handle = IngredientUidIndexCalls.computeGrouping();
-		if (handle == null) {
+		if (handle == null || jeasync$lock().isHeldByCurrentThread()) {
 			return;
 		}
-		jeasync$guard(cir, handle, new Object[] { ingredientType, uid, IngredientUidIndexCalls.guarding(valueSupplier) });
+		jeasync$guard(cir, IngredientUidIndexCalls.computeCall(this, handle, ingredientType, uid, IngredientUidIndexCalls.guarding(valueSupplier)));
 	}
 
 	@Inject(method = "forEach(Lmezz/jei/library/recipes/collect/IngredientUidIndex$EntryConsumer;)V", at = @At("HEAD"), cancellable = true, remap = false)
 	private void jeasync$lockForEach(@Coerce Object consumer, CallbackInfo ci) {
 		MethodHandle handle = IngredientUidIndexCalls.forEach();
-		if (handle == null) {
+		if (handle == null || jeasync$lock().isHeldByCurrentThread()) {
 			return;
 		}
-		jeasync$guardVoid(ci, handle, new Object[] { consumer });
+		jeasync$guardVoid(ci, IngredientUidIndexCalls.forEachCall(this, handle, consumer));
 	}
 
 	/**
 	 * Ordinary methods, not lambdas. A lambda's bootstrap handle points at this mixin class.
 	 * Mixin registers that class as unloadable, so the merged index then fails with
-	 * {@code IngredientUidIndexMixin is invalid}.
+	 * {@code IngredientUidIndexMixin is invalid}. The {@link Call} values are created in
+	 * {@link IngredientUidIndexCalls}, which is outside the mixin package, and use typed
+	 * {@code MethodHandle.invokeExact} calls rather than rebuilding an argument array per
+	 * index lookup.
 	 */
 	@Unique
-	private void jeasync$guard(CallbackInfoReturnable<Object> cir, MethodHandle handle, Object[] args) {
+	private void jeasync$guard(CallbackInfoReturnable<Object> cir, Call call) {
 		ReentrantLock lock = jeasync$lock();
 		if (lock.isHeldByCurrentThread()) {
 			return;
@@ -113,7 +117,7 @@ public abstract class IngredientUidIndexMixin {
 		dev.jeasync.MixinApplied.mark("collect.IngredientUidIndexMixin");
 		lock.lock();
 		try {
-			cir.setReturnValue(jeasync$invoke(handle, args));
+			cir.setReturnValue(call.run());
 		} catch (Throwable throwable) {
 			cir.cancel();
 			IngredientUidIndexCalls.rethrow(throwable);
@@ -123,7 +127,7 @@ public abstract class IngredientUidIndexMixin {
 	}
 
 	@Unique
-	private void jeasync$guardVoid(CallbackInfo ci, MethodHandle handle, Object[] args) {
+	private void jeasync$guardVoid(CallbackInfo ci, Call call) {
 		ReentrantLock lock = jeasync$lock();
 		if (lock.isHeldByCurrentThread()) {
 			return;
@@ -131,7 +135,7 @@ public abstract class IngredientUidIndexMixin {
 		dev.jeasync.MixinApplied.mark("collect.IngredientUidIndexMixin");
 		lock.lock();
 		try {
-			jeasync$invoke(handle, args);
+			call.run();
 			ci.cancel();
 		} catch (Throwable throwable) {
 			ci.cancel();
@@ -139,13 +143,5 @@ public abstract class IngredientUidIndexMixin {
 		} finally {
 			lock.unlock();
 		}
-	}
-
-	@Unique
-	private Object jeasync$invoke(MethodHandle handle, Object[] args) throws Throwable {
-		Object[] full = new Object[args.length + 1];
-		full[0] = this;
-		System.arraycopy(args, 0, full, 1, args.length);
-		return handle.invokeWithArguments(full);
 	}
 }

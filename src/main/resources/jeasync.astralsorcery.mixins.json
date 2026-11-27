@@ -1,0 +1,13 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "dev.jeasync.mixin.compat",
+  "plugin": "dev.jeasync.mixin.compat.AstralSorceryCompatMixinPlugin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "AstralSorceryTooltipMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}

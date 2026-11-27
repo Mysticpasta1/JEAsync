@@ -40,6 +40,13 @@ several subsystems changed enough that the old patch could not be reused as-is:
   "has vanilla values" and calls `getValues()`; simple custom ingredients such as
   `CompoundIngredient` throw there. An optional mixin makes that one lookup safe, so a genuinely
   empty custom ingredient is logged instead of crashing server startup.
+- **Astral Sorcery tooltip guard:** Astral Sorcery 2.0.3 iterates
+  `BuiltInRegistries.DATA_COMPONENT_TYPE` with `Registry.forEach` while tooltips are built, and
+  NeoForge's `MappedRegistry.iterator()` can hit a null ID slot left by registry sync. The
+  resulting `NullPointerException` fires on vanilla's creative-search worker threads and is caught
+  by the event bus, but it spams the log and drops Astral Sorcery's tooltip lines from the search
+  index. An optional mixin iterates the registry's name map instead, skipping the malformed slot.
+  It is applied only when Astral Sorcery is installed.
 - **Removed:** the 1.20.1-only per-mod patches. Avaritia, Apotheosis, Create, Iron's Spells,
   Mekanism, JEED, Tinkers with Enchants, Supplementaries, Capsule, Industrial Foregoing, Conduit,
   Sack Colouring and Almost Fluidified all changed their internals for 1.21.1, and carrying a
