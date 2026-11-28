@@ -3,20 +3,21 @@ package dev.jeasync.mixin.compat;
 import java.util.List;
 import java.util.Set;
 
-import net.neoforged.fml.ModList;
 import org.objectweb.asm.tree.ClassNode;
 import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
 import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
 
 /**
- * Applies the Astral Sorcery tooltip guard only when Astral Sorcery is installed. Probing the mod
- * list avoids loading the target class from inside the mixin plugin, which would re-enter mixin
- * application.
+ * Applies the Astral Sorcery tooltip guard only to Astral Sorcery classes.
+ * <p>
+ * This deliberately does not consult {@code ModList}. Mixin asks this question while the target
+ * class is being defined, which can be before the mod list is safe to query; caching a false
+ * answer there would disable the guard for the whole session even when Astral Sorcery is present.
+ * A target class with this prefix only exists when the mod is installed, so the prefix is the
+ * reliable test.
  */
 public final class AstralSorceryCompatMixinPlugin implements IMixinConfigPlugin {
-	private static final String ASTRAL_SORCERY = "astralsorcery";
-
-	private Boolean present;
+	private static final String ASTRAL_SORCERY_PACKAGE = "hellfirepvp.astralsorcery.";
 
 	@Override
 	public void onLoad(String mixinPackage) {
@@ -29,14 +30,7 @@ public final class AstralSorceryCompatMixinPlugin implements IMixinConfigPlugin 
 
 	@Override
 	public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
-		if (present == null) {
-			try {
-				present = ModList.get() != null && ModList.get().isLoaded(ASTRAL_SORCERY);
-			} catch (Throwable ignored) {
-				present = false;
-			}
-		}
-		return present;
+		return targetClassName.startsWith(ASTRAL_SORCERY_PACKAGE);
 	}
 
 	@Override

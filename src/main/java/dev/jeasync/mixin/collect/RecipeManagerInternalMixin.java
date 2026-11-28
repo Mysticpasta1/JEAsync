@@ -101,6 +101,24 @@ public abstract class RecipeManagerInternalMixin {
 	@Unique
 	private static final Set<String> jeasync$emptyReported = ConcurrentHashMap.newKeySet();
 
+	/**
+	 * A recipe class whose serializer lookup fails is logged once, not once per recipe. A fuel
+	 * plugin can hand JEI millions of recipes of the same class, and logging each failure with its
+	 * stack trace fills the async log queue and stalls the worker. The lookup result is still
+	 * "no serializer" for every instance.
+	 */
+	@Unique
+	private static final Set<Class<?>> jeasync$serializerFailureReported = ConcurrentHashMap.newKeySet();
+
+	/**
+	 * Recipe classes whose serializer lookup failed with a linkage error. That is a permanent
+	 * class-initialization failure, not a deferred value: retrying it for every instance of the
+	 * class only creates another exception. Runtime failures are not cached because they can be
+	 * transient while registration is still in flight.
+	 */
+	@Unique
+	private static final Set<Class<?>> jeasync$serializerUnavailable = ConcurrentHashMap.newKeySet();
+
 	@Unique
 	private static final ThreadLocal<Set<String>> jeasync$dedupKeys = ThreadLocal.withInitial(HashSet::new);
 
@@ -453,10 +471,19 @@ public abstract class RecipeManagerInternalMixin {
 		if (!(recipe instanceof Recipe<?> vanillaRecipe)) {
 			return null;
 		}
+		Class<?> recipeClass = vanillaRecipe.getClass();
+		if (jeasync$serializerUnavailable.contains(recipeClass)) {
+			return null;
+		}
 		try {
 			return BuiltInRegistries.RECIPE_SERIALIZER.getKey(vanillaRecipe.getSerializer());
 		} catch (RuntimeException | Error e) {
-			LOGGER.debug("jeasync: {} cannot report its serializer yet, it is registered unfiltered", vanillaRecipe.getClass().getName(), e);
+			if (e instanceof LinkageError) {
+				jeasync$serializerUnavailable.add(recipeClass);
+			}
+			if (jeasync$serializerFailureReported.add(recipeClass)) {
+				LOGGER.debug("jeasync: {} cannot report its serializer yet, it is registered unfiltered", recipeClass.getName(), e);
+			}
 			return null;
 		}
 	}

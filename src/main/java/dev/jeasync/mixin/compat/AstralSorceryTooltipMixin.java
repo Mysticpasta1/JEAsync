@@ -4,6 +4,8 @@ import dev.jeasync.MixinApplied;
 import net.minecraft.core.Registry;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.resources.ResourceKey;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
@@ -32,6 +34,9 @@ import java.util.function.Consumer;
 @Mixin(targets = "hellfirepvp.astralsorcery.common.event.handler.TooltipEventHandler", remap = false)
 public abstract class AstralSorceryTooltipMixin {
 	@Unique
+	private static final Logger jeasync$logger = LogManager.getLogger();
+
+	@Unique
 	private static volatile boolean jeasync$marked;
 
 	@Redirect(
@@ -46,6 +51,7 @@ public abstract class AstralSorceryTooltipMixin {
 		if (!jeasync$marked) {
 			jeasync$marked = true;
 			MixinApplied.mark("compat.AstralSorceryTooltipMixin");
+			jeasync$logger.info("jeasync: Astral Sorcery tooltip guard applied");
 		}
 		for (Map.Entry<ResourceKey<DataComponentType<?>>, DataComponentType<?>> entry : registry.entrySet()) {
 			DataComponentType<?> type = entry.getValue();
